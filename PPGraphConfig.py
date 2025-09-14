@@ -9,12 +9,19 @@ import IctConfig
 
 
 def calc_transmission_lat_s(datarate):
+    """calculates transmission delay in kByte"""
     p_size = IctConfig.max_p_size * 8
     transmission_lat = p_size / (datarate * 1000)
     return transmission_lat * 1000
 
 
-def _fix_graph_for_all_cycles(MG):
+def _fix_graph_for_all_cycles(MG: nx.Graph):
+    """some edges might be wrongly generaged and need to readded to the graph
+        Params:
+            mg: Modelled Graph from pandapower-based networks
+        Returns:
+            G: PhysGraph()
+    """
     G = PhysGraph()
     edgesMG = list(MG.edges(data=False))
 
@@ -39,30 +46,33 @@ def _fix_graph_for_all_cycles(MG):
     nx.set_node_attributes(G, values=p_mw, name='p_mw')
     return G
 
-def _remove_middle_compoents(G):
-    switches = [n for n in G.nodes if 'switch' in n]
+
+def _remove_middle_compoents(graph: PhysGraph):
+    """removes parts that are connected in the power grid line that are connected differently in the communication
+    network (star-like)"""
+    switches = [n for n in graph.nodes if 'switch' in n]
     for n in switches:
-        neighbor = list(G.neighbors(n))
+        neighbor = list(graph.neighbors(n))
         #print(neighbor)
-        G.add_edge(neighbor[0], neighbor[1])
+        graph.add_edge(neighbor[0], neighbor[1])
         if "Trafo" in neighbor[1]:
-            G.remove_edge(n, neighbor[1])
+            graph.remove_edge(n, neighbor[1])
         else:
-            G.remove_edge(n, neighbor[0])
-    Trafo = [n for n in G.nodes if 'Trafo' in n]
+            graph.remove_edge(n, neighbor[0])
+    Trafo = [n for n in graph.nodes if 'Trafo' in n]
 
     for n in Trafo:
-        neighbor = [n for n in G.neighbors(n) if "Trafo" not in n]
-        G.add_edge(neighbor[0], neighbor[1])
-        G.remove_edge(n, neighbor[0])
+        neighbor = [n for n in graph.neighbors(n) if "Trafo" not in n]
+        graph.add_edge(neighbor[0], neighbor[1])
+        graph.remove_edge(n, neighbor[0])
 
-    lv_busses = [n for n in G.nodes if "bus" in n]
+    lv_busses = [n for n in graph.nodes if "bus" in n]
     for n in lv_busses:
-        G.remove_node(n)
+        graph.remove_node(n)
 
-    router = [n for n in G.nodes() if "Bus" in n]
-    pos = nx.get_node_attributes(G, 'pos')
-    isolates = list(nx.isolates(G))
+    router = [n for n in graph.nodes() if "Bus" in n]
+    pos = nx.get_node_attributes(graph, 'pos')
+    isolates = list(nx.isolates(graph))
     coords_router = np.array([pos[n] for n in router])
     kdtree = cKDTree(coords_router)
     coords_iso = np.array([pos[n] for n in isolates])
@@ -70,14 +80,16 @@ def _remove_middle_compoents(G):
         dists, idxs = kdtree.query(coords_iso, k=1)
         for iso_node, connected_index in zip(isolates, idxs):
             target = router[connected_index]
-            G.add_edge(iso_node, target, weight=10, lat=20)
+            graph.add_edge(iso_node, target, weight=10, lat=20)
 
-    degrees = [(n, d) for n, d in nx.degree(G) if not "Bus" in n and d > 1]
+    degrees = [(n, d) for n, d in nx.degree(graph) if not "Bus" in n and d > 1]
     if degrees:
         raise ValueError("didnt delete all irrevant nodes that could act as router (but aren't)")
-    return G
+    return graph
+
 
 def _rename_components(G):
+    """renames former pandapower components to make easier distinguising between MV and LV, and to unify naming pattern"""
     mapping = {n: n.replace('Residential ', 'LV_CHP_') for n in G.nodes if 'Residential' in n}
     G = nx.relabel_nodes(G, mapping)
     mapping = {n: n.replace('Load R', 'MV_Load_') for n in G.nodes if 'Load R' in n}
@@ -117,7 +129,12 @@ def _rename_components(G):
         raise KeyError(f"missed components to consider renaming by {dif} ")
     return G
 
+
 def _create_public_topology(G):
+    """ create one backbone node and let all acces router connect to it in a star topology
+    :param G: PhysicalGrpah
+    :return:
+    """
     router = G.routers
     pos = nx.get_node_attributes(G, 'pos')
     core_edges = [edge for edge in G.edges if "R" in edge[0] and "R" in edge[1]]
@@ -130,7 +147,9 @@ def _create_public_topology(G):
         G.add_edge(r, "Backbone", weight=10e10, lat=0)
     return G
 
+
 def _contract_router(G):
+    """contracts edges in order to reduce the amount of router by approx a third"""
     edges = [edge for edge in G.edges() if "R" in edge[0] and "R" in edge[1]]
     H = G.copy()
     for i, (u, v) in enumerate(edges):
@@ -143,7 +162,9 @@ def _contract_router(G):
 
     return H
 
+
 def _create_small_worlds_for_areas(G, cycle_edges, k, p, br_core):
+    """adds random cross-connections via newman-watts-strogatz to areas"""
     conn = []
     for cycle in cycle_edges:
         # k = max(int(len(cycle) / 2), 2)
@@ -164,7 +185,10 @@ def _create_small_worlds_for_areas(G, cycle_edges, k, p, br_core):
     G.avg_alg_conn_cycle = np.mean(conn)
     return G
 
+
 def find_server_place(G):
+    """Ranks routers for potential server placements
+    considers node degree of the router, close switch or transformer, and PV in the connected LV-grid"""
     H = nx.Graph()
     # create graph with where routers are involved
     for (u, v) in G.edges():
@@ -197,8 +221,11 @@ def find_server_place(G):
     output = [(n, d + s + e) for n, d, s, e in zip(nodes, degree, swtiches, normalized_ee)]
     return output
 
+
 def predetermine_cigre_sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_rings=False, public_topo=False,
                   comp_factor=1, br_edge=10, br_core=100):
+    """only generates a graph once for one parameterization combination.
+    If it already exists, it loads the pickled graph"""
     graph_name = (f"CigreMVLV_router_reducted={router_reduced}_swp={sw_p}_swk={sw_k}_regard_rings={regard_rings}"
                   f"_public_topo={public_topo}_comp_factor={1}_br_edge={br_edge}_core={br_core}.pkl")
     directory = "graphs/"
@@ -206,12 +233,12 @@ def predetermine_cigre_sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_ri
     path = directory+graph_name
     if os.path.exists(path):
         graph = pickle.load(open(path, "rb"))
-        print(f"{graph_name} existiert bereits.")
+        print(f"{graph_name} already.")
     else:
         graph = Cigre_Sampled(router_reduced=router_reduced, sw_p=sw_p, sw_k=sw_k, regard_rings=regard_rings,
                               public_topo=public_topo, comp_factor=comp_factor, br_edge=br_edge, br_core=br_core)
         pickle.dump(graph, open(path, "wb"))
-        print(f"{graph_name} wurde nicht gefunden.")
+        print(f"{graph_name} was not found.")
     return graph
 
 def Cigre_Sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_rings=False, public_topo=False,
