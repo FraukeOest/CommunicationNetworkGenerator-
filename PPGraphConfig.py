@@ -6,6 +6,8 @@ from scipy.spatial import cKDTree
 from re import search
 import os
 import IctConfig
+import simbench as sb
+import pandapower
 
 
 def calc_transmission_lat_s(datarate):
@@ -242,12 +244,14 @@ def predetermine_cigre_sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_ri
     return graph
 
 def Cigre_Sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_rings=False, public_topo=False,
-                  comp_factor=1, br_edge=10, br_core=100, filename="cigre_MV_LV_Graph.pkl"):
-    with open(filename, 'rb') as outfile:
-        MG = pickle.load(outfile)
-    unfixed_grap = True
-    print("fix graph")
-    G = _fix_graph_for_all_cycles(MG)
+                  comp_factor=1, br_edge=10, br_core=100, MG:nx.Graph = None):
+    try:
+        cycle_edges = list(nx.minimum_cycle_basis(MG))
+        G = PhysGraph(MG)
+    except:
+        print("fix graph")
+        G = _fix_graph_for_all_cycles(MG)
+
     G.remove_nodes_from(['S1', 'S2', 'S3'])  # these are not servers, but names for switches
     print("remove middle components")
     G = _remove_middle_compoents(G)
@@ -326,7 +330,13 @@ def Cigre_Sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_rings=False, pu
 
 
 if __name__ == '__main__':
-    G = Cigre_Sampled(sw_k=0, sw_p=0, regard_rings=True)
+    grid = '1-LV-rural1--1-no_sw'
+    mv_net = sb.get_simbench_net(grid)
+    MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
+    # with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
+    #     MG = pickle.load(outfile)
+
+    G = Cigre_Sampled(sw_k=0, sw_p=0, regard_rings=True, MG=MG)
     unused_server = G.servers[11:]
     G.servers = G.servers[0:11]
     for s in unused_server:
