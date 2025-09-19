@@ -50,7 +50,7 @@ CPU_RES = {0: 0,
 MEM_RES = {0: 0,
            1: 0.2,  # GB
            2: 2,  # GB
-           3: 8}  # GB
+           3: 4}  # GB
 STO_RES = {0: 0,
            1: 0.500,  # GB
            2: 4,  # GB
@@ -73,10 +73,10 @@ S2_RES = {"cpu": 4,  # num cores
 S12_RES = {"cpu": 20,  # num cores
            "mem": 40,  # GB
            "sto": 100}  # GB
-S_PI = {
+S_PI = { #Raspberry Pi 4B/8GB (rev. 1.4) als Nachfolger des Pi 3B+ (https://www.raspberrypi.com/products/raspberry-pi-4-model-b/) mit abzug des betriebssystems
     "cpu": 4,
-    "mem": 1,
-    "sto": 16
+    "mem": 8 - 0.5,
+    "sto": 16 - 3
 }
 
 medium = {"cpu": 2,  # num cores
