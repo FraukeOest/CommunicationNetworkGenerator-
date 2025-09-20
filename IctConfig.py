@@ -50,7 +50,7 @@ CPU_RES = {0: 0,
 MEM_RES = {0: 0,
            1: 0.2,  # GB
            2: 2,  # GB
-           3: 4}  # GB
+           3: 8}  # GB
 STO_RES = {0: 0,
            1: 0.500,  # GB
            2: 4,  # GB
@@ -68,7 +68,7 @@ BR_STEPS = {1: 10,  # kbit
             2: 64,
             3: 100,
             4: 1000,
-            5: 3000,  # 3Mbit
+            5: 3000 # 3Mbit
             }
 
 S1_RES = {"cpu": 6,  # num cores
