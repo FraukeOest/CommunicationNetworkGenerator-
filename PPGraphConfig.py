@@ -111,7 +111,7 @@ def determine_crossconnection(G, nodes_list, r_n, b, c):
         key=lambda x: (x[1][0], x[1][1]),
         reverse=True
     )
-    n = round(len(nodes_list) * r_n, 0)
+    n = int(round(len(nodes_list) * r_n, 0))
     first_n = dict(solutions_sorted[:n])
     return first_n
 
@@ -298,12 +298,11 @@ def find_server_place(G):
     return output
 
 
-def predetermine_cigre_sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_rings=False, public_topo=False,
-                  comp_factor=1, br_edge=10, br_core=100):
+def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100):
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
-    graph_name = (f"CigreMVLV_router_reducted={router_reduced}_swp={sw_p}_swk={sw_k}_regard_rings={regard_rings}"
-                  f"_public_topo={public_topo}_comp_factor={1}_br_edge={br_edge}_core={br_core}.pkl")
+    graph_name = (f"CigreMVLV_router_reducted={router_reduced}_r_n={r_n}_ w_hops={ w_hops}_w_degrees={w_degree}"
+                  f"_comp_factor={1}_br_edge={br_edge}_core={br_core}.pkl")
     directory = "graphs/"
 
     path = directory+graph_name
@@ -311,8 +310,10 @@ def predetermine_cigre_sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_ri
         graph = pickle.load(open(path, "rb"))
         print(f"{graph_name} already.")
     else:
-        graph = Cigre_Sampled(router_reduced=router_reduced, sw_p=sw_p, sw_k=sw_k, regard_rings=regard_rings,
-                              public_topo=public_topo, comp_factor=comp_factor, br_edge=br_edge, br_core=br_core)
+        with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
+            MG = pickle.load(outfile)
+        graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_hops=w_hops, w_degree=w_degree,
+                               comp_factor=comp_factor, br_edge=br_edge, br_core=br_core, MG=MG)
         pickle.dump(graph, open(path, "wb"))
         print(f"{graph_name} was not found.")
     return graph
