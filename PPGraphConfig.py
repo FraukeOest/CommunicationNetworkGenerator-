@@ -48,6 +48,57 @@ def _fix_graph_for_all_cycles(MG: nx.Graph):
     nx.set_node_attributes(G, values=p_mw, name='p_mw')
     return G
 
+def determine_crossconnection(G, nodes_list, n, a, b, c):
+    """
+        Params: G: physical graph
+                nodeslist: list of nodes in a cycle
+                n: max number of cross connections
+                a: weight of geolocation
+                b: weight of hops
+                c: weight of degree
+        Returns:
+            list of n crossconnection edges
+    """
+    nodes = nodes_list
+    coords = np.array([pos[u] for u in nodes])
+    idx_of = {u: i for i, u in enumerate(nodes)}
+
+        # Distanzmatrix (symmetrisch)
+        # Für große Graphen optional durch KD-Tree ersetzen.
+    geo_dist = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=-1)
+    dic_geo_dist = {(i, j): float(geo_dist[i][j]) for i in range(len(geo_dist)) for j in range(len(geo_dist[i])) if i != j}
+    sorted_d_geo_dist = dict(sorted(dic_geo_dist.items(), key=lambda item: item[1]))
+    # avg_degree = sum(dict(G.degree()).values()) / G.number_of_nodes()
+    # for (u, v), val in sorted_d.items():
+    #     if not G.has_edge(u, v):
+    #         G.add_edge(u, v)
+    #     avg_degree = sum(dict(G.degree()).values()) / G.number_of_nodes()
+    #     if avg_degree > 4:
+    #         break
+
+
+    hops = dict(nx.all_pairs_shortest_path_length(G))
+    dict_hops = {(k, i): j for k, v in hops.items() for i, j in v.items() if 1 < j < i}
+    sorted_d_hops = dict(sorted(dict_hops.items(), key=lambda item: item[1]))
+    print(sorted_d_hops)
+    max_geo_local = max(sorted_d_geo_dist.values())
+    norm_geo_local = {k: v / max_geo_local for k, v in sorted_d_geo_dist.items() if k in sorted_d_hops.keys()}
+
+    max_hops = max(sorted_d_hops.values())
+    norm_hops = {k: v / max_hops for k, v in sorted_d_hops.items()}
+
+    edge_degree = {k: G.degree[k[0]] + G.degree[k[1]] for k in sorted_d_hops.keys()}
+    max_edge_degree = max(edge_degree.values())
+    norm_edge_degree = {k: v / max_edge_degree for k, v in edge_degree.items()}
+
+    uniform_sorting = {k: a*1-norm_geo_local[k]+b*norm_hops[k]+c*norm_edge_degree[k] for k in norm_hops.keys()}
+    first_n = dict(list(uniform_sorting.items())[:n])
+    return first_n
+
+def add_crossconnetions(G, list_of_overlay_links):
+    for (u, v) in list_of_overlay_links:
+        G.add_edge(u, v)
+    return G
 
 def _remove_middle_compoents(graph: PhysGraph):
     """removes parts that are connected in the power grid line that are connected differently in the communication
