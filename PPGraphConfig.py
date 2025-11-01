@@ -51,7 +51,7 @@ def _fix_graph_for_all_cycles(MG: nx.Graph):
         raise ValueError("fixing failed, no nodes in graph")
     return G
 
-def determine_crossconnection(G, nodes_list, r_n, b, c):
+def determine_crossconnection(G, nodes_list, r_n, a, b, c):
     """
         Params: G: physical graph
                 nodeslist: list of nodes in a cycle
@@ -104,11 +104,20 @@ def determine_crossconnection(G, nodes_list, r_n, b, c):
     max_edge_degree = max(edge_degree.values())
     norm_edge_degree = {k: v / max_edge_degree for k, v in edge_degree.items()}
 
-    uniform_sorting = {k:(round(b * norm_hops[k] + c * norm_edge_degree[k], 2), 1 - norm_geo_local[k]) for k in
+    # uniform_sorting = {k:(round(b * norm_hops[k] + c * norm_edge_degree[k], 2), 1 - norm_geo_local[k]) for k in
+    #                    norm_hops.keys()}
+    # solutions_sorted = sorted(
+    #     uniform_sorting.items(),
+    #     key=lambda x: (x[1][0], x[1][1]),
+    #     reverse=True
+    # )
+    # n = int(round(len(nodes_list) * r_n, 0))
+    # first_n = dict(solutions_sorted[:n])
+    uniform_sorting = {k: 1 - norm_geo_local[k] + b * norm_hops[k] + c * norm_edge_degree[k] for k in
                        norm_hops.keys()}
     solutions_sorted = sorted(
         uniform_sorting.items(),
-        key=lambda x: (x[1][0], x[1][1]),
+        key=lambda x: (x[1]),
         reverse=True
     )
     n = int(round(len(nodes_list) * r_n, 0))
@@ -298,10 +307,10 @@ def find_server_place(G):
     return output
 
 
-def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100):
+def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100):
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
-    graph_name = (f"CigreMVLV_router_reducted={router_reduced}_r_n={r_n}_ w_hops={ w_hops}_w_degrees={w_degree}"
+    graph_name = (f"CigreMVLV_router_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
                   f"_comp_factor={1}_br_edge={br_edge}_core={br_core}.pkl")
     directory = "graphs/"
 
@@ -312,13 +321,13 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_hops=1, w_degree=1
     else:
         with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
             MG = pickle.load(outfile)
-        graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_hops=w_hops, w_degree=w_degree,
+        graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
                                comp_factor=comp_factor, br_edge=br_edge, br_core=br_core, MG=MG)
         pickle.dump(graph, open(path, "wb"))
         print(f"{graph_name} was not found.")
     return graph
 
-def Cigre_Sampled(router_reduced=False, rel_n_crosslinks=1, w_hops= 1, w_degree=1,
+def Cigre_Sampled(router_reduced=False, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_degree=1,
                   comp_factor=1, br_edge=10, br_core=100, MG:nx.Graph = None):
     try:
         cycle_edges = list(nx.minimum_cycle_basis(MG))
@@ -394,7 +403,7 @@ def Cigre_Sampled(router_reduced=False, rel_n_crosslinks=1, w_hops= 1, w_degree=
     G.n_areas = len(cycle_edges)
     #G = _create_small_worlds_for_areas(G, cycle_edges, sw_k, sw_p, br_core)
     for cycle in cycle_edges:
-        crossy_list = determine_crossconnection(G, nodes_list=cycle, r_n=rel_n_crosslinks, b=w_hops, c=w_degree)
+        crossy_list = determine_crossconnection(G, nodes_list=cycle, r_n=rel_n_crosslinks, a=w_geo, b=w_hops, c=w_degree)
         G = add_crossconnetions(G, crossy_list, br_core)
 
     for u ,v, d in G.edges(data=True):
