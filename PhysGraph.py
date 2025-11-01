@@ -22,7 +22,7 @@ class Server():
 class PhysGraph(nx.Graph):
 
     def __init__(self, data=None,**attr):
-        super(PhysGraph, self).__init__()
+        super().__init__(data, **attr)
         self.__max_bitrate = None
         self.servers = None
         self.ot_devices = None

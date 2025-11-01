@@ -46,9 +46,12 @@ def _fix_graph_for_all_cycles(MG: nx.Graph):
     p_mw = nx.get_node_attributes(MG, 'p_mw')
     nx.set_node_attributes(G, values=pos, name='pos')
     nx.set_node_attributes(G, values=p_mw, name='p_mw')
+
+    if len(list(G.nodes)) == 0:
+        raise ValueError("fixing failed, no nodes in graph")
     return G
 
-def determine_crossconnection(G, nodes_list, n, a, b, c):
+def determine_crossconnection(G, nodes_list, r_n, b, c):
     """
         Params: G: physical graph
                 nodeslist: list of nodes in a cycle
@@ -59,14 +62,20 @@ def determine_crossconnection(G, nodes_list, n, a, b, c):
         Returns:
             list of n crossconnection edges
     """
-    nodes = nodes_list
+    nodes = nodes_list #= list(G.nodes)
+    pos = nx.get_node_attributes(G, 'pos')
     coords = np.array([pos[u] for u in nodes])
     idx_of = {u: i for i, u in enumerate(nodes)}
 
         # Distanzmatrix (symmetrisch)
         # Für große Graphen optional durch KD-Tree ersetzen.
     geo_dist = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=-1)
-    dic_geo_dist = {(i, j): float(geo_dist[i][j]) for i in range(len(geo_dist)) for j in range(len(geo_dist[i])) if i != j}
+    dic_geo_dist = {
+        (nodes[i], nodes[j]): float(geo_dist[i][j])
+        for i in range(len(nodes))
+        for j in range(len(nodes))
+        if i != j
+    }
     sorted_d_geo_dist = dict(sorted(dic_geo_dist.items(), key=lambda item: item[1]))
     # avg_degree = sum(dict(G.degree()).values()) / G.number_of_nodes()
     # for (u, v), val in sorted_d.items():
@@ -76,9 +85,13 @@ def determine_crossconnection(G, nodes_list, n, a, b, c):
     #     if avg_degree > 4:
     #         break
 
-
-    hops = dict(nx.all_pairs_shortest_path_length(G))
-    dict_hops = {(k, i): j for k, v in hops.items() for i, j in v.items() if 1 < j < i}
+    G_sub = G.subgraph(nodes_list).copy()
+    hops = dict(nx.all_pairs_shortest_path_length(G_sub))
+    dict_hops = {}
+    for k, v in hops.items():
+        for i, j in v.items():
+            if j > 1 and (i, k) not in dict_hops:
+                dict_hops[(k, i)] = j
     sorted_d_hops = dict(sorted(dict_hops.items(), key=lambda item: item[1]))
     print(sorted_d_hops)
     max_geo_local = max(sorted_d_geo_dist.values())
@@ -91,18 +104,28 @@ def determine_crossconnection(G, nodes_list, n, a, b, c):
     max_edge_degree = max(edge_degree.values())
     norm_edge_degree = {k: v / max_edge_degree for k, v in edge_degree.items()}
 
-    uniform_sorting = {k: a*1-norm_geo_local[k]+b*norm_hops[k]+c*norm_edge_degree[k] for k in norm_hops.keys()}
-    first_n = dict(list(uniform_sorting.items())[:n])
+    uniform_sorting = {k:(round(b * norm_hops[k] + c * norm_edge_degree[k], 2), 1 - norm_geo_local[k]) for k in
+                       norm_hops.keys()}
+    solutions_sorted = sorted(
+        uniform_sorting.items(),
+        key=lambda x: (x[1][0], x[1][1]),
+        reverse=True
+    )
+    n = round(len(nodes_list) * r_n, 0)
+    first_n = dict(solutions_sorted[:n])
     return first_n
 
-def add_crossconnetions(G, list_of_overlay_links):
+def add_crossconnetions(G, list_of_overlay_links, br_core):
     for (u, v) in list_of_overlay_links:
-        G.add_edge(u, v)
+        lat = calc_transmission_lat_s(br_core)
+        G.add_edges_from([(u, v, {"weight": br_core, "lat": lat})])
     return G
 
 def _remove_middle_compoents(graph: PhysGraph):
     """removes parts that are connected in the power grid line that are connected differently in the communication
     network (star-like)"""
+    if not list(graph.nodes):
+        raise ValueError("no nodes in Graph to be remodelled")
     switches = [n for n in graph.nodes if 'switch' in n]
     for n in switches:
         neighbor = list(graph.neighbors(n))
@@ -113,6 +136,7 @@ def _remove_middle_compoents(graph: PhysGraph):
         else:
             graph.remove_edge(n, neighbor[0])
     Trafo = [n for n in graph.nodes if 'Trafo' in n]
+
 
     for n in Trafo:
         neighbor = [n for n in graph.neighbors(n) if "Trafo" not in n]
@@ -182,8 +206,7 @@ def _rename_components(G):
         raise KeyError(f"missed components to consider renaming by {dif} ")
     return G
 
-
-def _create_public_topology(G):
+def __create_public_topology(G):
     """ create one backbone node and let all acces router connect to it in a star topology
     :param G: PhysicalGrpah
     :return:
@@ -294,7 +317,7 @@ def predetermine_cigre_sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_ri
         print(f"{graph_name} was not found.")
     return graph
 
-def Cigre_Sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_rings=False, public_topo=False,
+def Cigre_Sampled(router_reduced=False, rel_n_crosslinks=1, w_hops= 1, w_degree=1,
                   comp_factor=1, br_edge=10, br_core=100, MG:nx.Graph = None):
     try:
         cycle_edges = list(nx.minimum_cycle_basis(MG))
@@ -356,21 +379,22 @@ def Cigre_Sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_rings=False, pu
             G[u][v]["lat"] = calc_transmission_lat_s(br_edge)
 
     print("creating finegrained topology")
-    if public_topo:
-        G = _create_public_topology(G)
-    else:
-        if router_reduced:
-            G = _contract_router(G)
+    regard_rings = True
+    if router_reduced:
+        G = _contract_router(G)
         # create small worlds
-        if regard_rings:
-            cycle_edges = list(nx.minimum_cycle_basis(G, weight=None))
-            print(len(cycle_edges))
-            print(cycle_edges)
-        else:
-            router = [n for n in G.nodes() if "R" in n]
-            cycle_edges = [router]
-        G.n_areas = len(cycle_edges)
-        G = _create_small_worlds_for_areas(G, cycle_edges, sw_k, sw_p, br_core)
+    if regard_rings:
+        cycle_edges = list(nx.minimum_cycle_basis(G, weight=None))
+        print(len(cycle_edges))
+        print(cycle_edges)
+    else:
+        router = [n for n in G.nodes() if "R" in n]
+        cycle_edges = [router]
+    G.n_areas = len(cycle_edges)
+    #G = _create_small_worlds_for_areas(G, cycle_edges, sw_k, sw_p, br_core)
+    for cycle in cycle_edges:
+        crossy_list = determine_crossconnection(G, nodes_list=cycle, r_n=rel_n_crosslinks, b=w_hops, c=w_degree)
+        G = add_crossconnetions(G, crossy_list, br_core)
 
     for u ,v, d in G.edges(data=True):
         if "weight" not in G[u][v]:
@@ -382,12 +406,12 @@ def Cigre_Sampled(router_reduced=False, sw_p=0.5, sw_k=2, regard_rings=False, pu
 
 if __name__ == '__main__':
     grid = '1-LV-rural1--1-no_sw'
-    mv_net = sb.get_simbench_net(grid)
-    MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
-    # with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
-    #     MG = pickle.load(outfile)
+    #mv_net = sb.get_simbench_net(grid)
+    #MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
+    with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
+        MG = pickle.load(outfile)
 
-    G = Cigre_Sampled(sw_k=0, sw_p=0, regard_rings=True, MG=MG)
+    G = Cigre_Sampled(MG=MG)
     unused_server = G.servers[11:]
     G.servers = G.servers[0:11]
     for s in unused_server:
