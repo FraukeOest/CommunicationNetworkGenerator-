@@ -27,6 +27,7 @@ class PhysGraph(nx.Graph):
         self.servers = None
         self.ot_devices = None
         self.routers = None
+        self.cross_connections = []
         self.__max_delay_in_system = None
         self.__max_number_paths = None
         self.avg_alg_conn_cycle = None

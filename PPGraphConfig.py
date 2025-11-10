@@ -120,7 +120,7 @@ def determine_crossconnection(G, nodes_list, r_n, a, b, c):
         key=lambda x: (x[1]),
         reverse=True
     )
-    n = int(round(len(nodes_list) * r_n, 0))
+    n = int(round(len(nodes_list) * r_n, 0)) #n = int(round(len(solutions_sorted) * r_n, 0))
     first_n = dict(solutions_sorted[:n])
     return first_n
 
@@ -404,6 +404,7 @@ def Cigre_Sampled(router_reduced=False, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w
     #G = _create_small_worlds_for_areas(G, cycle_edges, sw_k, sw_p, br_core)
     for cycle in cycle_edges:
         crossy_list = determine_crossconnection(G, nodes_list=cycle, r_n=rel_n_crosslinks, a=w_geo, b=w_hops, c=w_degree)
+        G.cross_connections.extend(list(crossy_list))
         G = add_crossconnetions(G, crossy_list, br_core)
 
     for u ,v, d in G.edges(data=True):
