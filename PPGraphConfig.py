@@ -113,7 +113,7 @@ def determine_crossconnection(G, nodes_list, r_n, a, b, c):
     # )
     # n = int(round(len(nodes_list) * r_n, 0))
     # first_n = dict(solutions_sorted[:n])
-    uniform_sorting = {k: 1 - norm_geo_local[k] + b * norm_hops[k] + c * norm_edge_degree[k] for k in
+    uniform_sorting = {k: a * (1 - norm_geo_local[k]) + b * norm_hops[k] + c * norm_edge_degree[k] for k in
                        norm_hops.keys()}
     solutions_sorted = sorted(
         uniform_sorting.items(),
