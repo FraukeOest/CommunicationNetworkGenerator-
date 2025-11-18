@@ -237,20 +237,33 @@ def _contract_router(G, reduced_to_factor):
     """contracts edges in order to reduce the amount of router by approx a third"""
     edges = [edge for edge in G.edges() if "R" in edge[0] and "R" in edge[1]]
     H = G.copy()
+    H.routers = [node for node in G.routers if node in H.nodes]
     if reduced_to_factor > 1:
         raise ValueError(f"reduced_to_factor must be below 1 but is currently {reduced_to_factor}")
-    #n_reduced_router = int(round(len(G.routers) * reduced_to_factor))
-    if 0.6 < reduced_to_factor < 0.7:
-        contract_every = 3
-    if reduced_to_factor == 0.5:
-        contract_every = 2
-    for i, (u, v) in enumerate(edges):
-        if i % contract_every == 0 and H.has_edge(u, v):
-            H = nx.contracted_edge(H, (u, v), copy=False, self_loops=False)
-            print(f"contracted {u, v}")
+    n_reduced_router = max(int(round(len(G.routers) * reduced_to_factor)), 4)
+    #sorted_router = sorted(G.routers, key=lambda n: G.degree(n))
+    while len(H.routers) > n_reduced_router:
+        sorted_router = sorted(H.routers, key=lambda n: H.degree(n))
+        r = sorted_router[0]
+        #for r in sorted_router:
+        neighbors = [n for n in H.neighbors(r) if n in H.routers]
+        sorted_neighbors = sorted(neighbors, key=lambda n: H.degree(n))
+        v = sorted_neighbors[0]
+        if H.has_edge(r, v):
+            H = nx.contracted_edge(H, (r, v), copy=False, self_loops=False)
+        H.routers = [node for node in G.routers if node in H.nodes]
+    # if 0.6 < reduced_to_factor < 0.7:
+    #     contract_every = 3
+    # if reduced_to_factor == 0.5:
+    #     contract_every = 2
+    # for i, (u, v) in enumerate(edges):
+    #     if i % contract_every == 0 and H.has_edge(u, v):
+    #         H = nx.contracted_edge(H, (u, v), copy=False, self_loops=False)
+    #         print(f"contracted {u, v}")
     H.servers = G.servers
     H.routers = [node for node in G.routers if node in H.nodes]
     H.ot_devices = G.ot_devices
+    #print({r: H.degree(r) for r in H.routers})
     return H
 
 
@@ -428,7 +441,7 @@ if __name__ == '__main__':
     with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
         MG = pickle.load(outfile)
 
-    G = Cigre_Sampled(MG=MG)
+    G = Cigre_Sampled(MG=MG, router_reduced=0.5)
     unused_server = G.servers[11:]
     G.servers = G.servers[0:11]
     for s in unused_server:
