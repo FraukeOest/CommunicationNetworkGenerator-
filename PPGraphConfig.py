@@ -233,18 +233,24 @@ def __create_public_topology(G):
     return G
 
 
-def _contract_router(G):
+def _contract_router(G, reduced_to_factor):
     """contracts edges in order to reduce the amount of router by approx a third"""
     edges = [edge for edge in G.edges() if "R" in edge[0] and "R" in edge[1]]
     H = G.copy()
+    if reduced_to_factor > 1:
+        raise ValueError(f"reduced_to_factor must be below 1 but is currently {reduced_to_factor}")
+    #n_reduced_router = int(round(len(G.routers) * reduced_to_factor))
+    if 0.6 < reduced_to_factor < 0.7:
+        contract_every = 3
+    if reduced_to_factor == 0.5:
+        contract_every = 2
     for i, (u, v) in enumerate(edges):
-        if i % 3 == 0 and H.has_edge(u, v):
+        if i % contract_every == 0 and H.has_edge(u, v):
             H = nx.contracted_edge(H, (u, v), copy=False, self_loops=False)
             print(f"contracted {u, v}")
     H.servers = G.servers
     H.routers = [node for node in G.routers if node in H.nodes]
     H.ot_devices = G.ot_devices
-
     return H
 
 
@@ -327,7 +333,7 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w
         print(f"{graph_name} was not found.")
     return graph
 
-def Cigre_Sampled(router_reduced=False, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_degree=1,
+def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_degree=1,
                   comp_factor=1, br_edge=10, br_core=100, MG:nx.Graph = None):
     try:
         cycle_edges = list(nx.minimum_cycle_basis(MG))
@@ -390,8 +396,8 @@ def Cigre_Sampled(router_reduced=False, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w
 
     print("creating finegrained topology")
     regard_rings = True
-    if router_reduced:
-        G = _contract_router(G)
+    if router_reduced < 1:
+        G = _contract_router(G, router_reduced)
         # create small worlds
     if regard_rings:
         cycle_edges = list(nx.minimum_cycle_basis(G, weight=None))
