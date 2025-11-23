@@ -6,6 +6,7 @@ from scipy.spatial import cKDTree
 from re import search
 import os
 import IctConfig
+from pathlib import Path
 import simbench as sb
 import pandapower
 
@@ -338,7 +339,9 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w
         graph = pickle.load(open(path, "rb"))
         print(f"{graph_name} already.")
     else:
-        with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
+        BASE_DIR = Path(__file__).resolve().parent
+        pkl_path = BASE_DIR / "cigre_MV_LV_Graph.pkl"
+        with open(pkl_path,'rb') as outfile:
             MG = pickle.load(outfile)
         graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
                                comp_factor=comp_factor, br_edge=br_edge, br_core=br_core, MG=MG)
