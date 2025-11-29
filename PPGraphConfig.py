@@ -332,9 +332,10 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w
     If it already exists, it loads the pickled graph"""
     graph_name = (f"CigreMVLV_router_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
                   f"_comp_factor={1}_br_edge={br_edge}_core={br_core}.pkl")
-    directory = "graphs/"
-
-    path = directory+graph_name
+    cwd = Path.cwd()
+    parent = cwd.parent
+    graph_dir = parent / "graphs"
+    path = graph_dir / graph_name
     if os.path.exists(path):
         graph = pickle.load(open(path, "rb"))
         print(f"{graph_name} already.")
@@ -345,6 +346,7 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w
             MG = pickle.load(outfile)
         graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
                                comp_factor=comp_factor, br_edge=br_edge, br_core=br_core, MG=MG)
+
         pickle.dump(graph, open(path, "wb"))
         print(f"{graph_name} was not found.")
     return graph
