@@ -331,7 +331,7 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
     graph_name = (f"CigreMVLV_router_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
-                  f"_comp_factor={1}_br_edge={br_edge}_core={br_core}.pkl")
+                  f"_comp_factor={comp_factor}_br_edge={br_edge}_core={br_core}.pkl")
     cwd = Path.cwd()
     parent = cwd.parent
     graph_dir = parent / "graphs"
