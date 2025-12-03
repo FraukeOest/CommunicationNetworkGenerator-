@@ -408,6 +408,9 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
         if 'R' in u and 'R' in v: # Core Network
             G[u][v]["weight"] = br_core
             G[u][v]["lat"] = calc_transmission_lat_s(br_core)
+        elif u in servers or v in servers:
+            G[u][v]["weight"] = br_core
+            G[u][v]["lat"] = calc_transmission_lat_s(br_core)
         else: # Access Network
             G[u][v]["weight"] = br_edge
             G[u][v]["lat"] = calc_transmission_lat_s(br_edge)
