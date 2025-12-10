@@ -327,7 +327,7 @@ def find_server_place(G):
     return output
 
 
-def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100):
+def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100, regenerate=False):
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
     graph_name = (f"CigreMVLV_router_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
@@ -336,19 +336,19 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w
     parent = cwd.parent
     graph_dir = parent / "graphs"
     path = graph_dir / graph_name
-    if os.path.exists(path):
+    if os.path.exists(path) and not regenerate:
         graph = pickle.load(open(path, "rb"))
         print(f"{graph_name} already.")
     else:
         BASE_DIR = Path(__file__).resolve().parent
         pkl_path = BASE_DIR / "cigre_MV_LV_Graph.pkl"
         with open(pkl_path,'rb') as outfile:
-            MG = pickle.load(outfile)
+                MG = pickle.load(outfile)
         graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
-                               comp_factor=comp_factor, br_edge=br_edge, br_core=br_core, MG=MG)
-
-        pickle.dump(graph, open(path, "wb"))
-        print(f"{graph_name} was not found.")
+                                   comp_factor=comp_factor, br_edge=br_edge, br_core=br_core, MG=MG)
+        if not regenerate:
+            pickle.dump(graph, open(path, "wb"))
+            print(f"{graph_name} was not found.")
     return graph
 
 def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_degree=1,
