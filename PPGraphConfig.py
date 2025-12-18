@@ -9,7 +9,15 @@ import IctConfig
 from pathlib import Path
 import simbench as sb
 import pandapower
-
+import json
+import time
+import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    message=r".*DataFrame concatenation with empty or all-NA entries.*"
+)
 
 def calc_transmission_lat_s(datarate):
     """calculates transmission delay in kByte"""
@@ -202,6 +210,13 @@ def _rename_components(G):
     mapping = {n: n.replace('Trafo', 'HVMV_Trafo') for n in G.nodes if 'Trafo' in n}
     G = nx.relabel_nodes(G, mapping)
     mapping = {n: n.replace('trafo', 'MVLV_trafo') for n in G.nodes if 'trafo' in n}
+    G = nx.relabel_nodes(G, mapping)
+
+    mapping = {
+        n: "LV_PV_" + n.split("SGen", 1)[1].strip()
+        for n in G.nodes
+        if "SGen" in n
+    }
     G = nx.relabel_nodes(G, mapping)
 
     accepted_keys = ['HVMV_Trafo', 'MVLV_trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
@@ -442,16 +457,70 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
     return G
 
 
-if __name__ == '__main__':
-    grid = '1-LV-rural1--1-no_sw'
-    #mv_net = sb.get_simbench_net(grid)
-    #MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
-    with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
-        MG = pickle.load(outfile)
+def positions(mv_net):
+    pos = {}
+    # 1) Falls bus_geodata existiert (bei dir offenbar nicht)
+    if hasattr(mv_net, "bus_geodata"):
+        if len(mv_net.bus_geodata.index) > 0 and {"x", "y"}.issubset(mv_net.bus_geodata.columns):
+            pos = {b: (mv_net.bus_geodata.at[b, "x"], mv_net.bus_geodata.at[b, "y"])
+                   for b in mv_net.bus_geodata.index if b in MG}
 
-    G = Cigre_Sampled(MG=MG, router_reduced=0.5)
-    unused_server = G.servers[11:]
-    G.servers = G.servers[0:11]
-    for s in unused_server:
-        G.remove_node(s.name)
-    G.plot(legend=True)
+    # 2) Manche Netze haben x/y direkt in net.bus
+    if not pos and {"x", "y"}.issubset(getattr(mv_net, "bus", []).columns):
+        pos = {b: (mv_net.bus.at[b, "x"], mv_net.bus.at[b, "y"])
+               for b in mv_net.bus.index if b in MG}
+
+    # 3) Oder GeoJSON-artig in net.bus["geo"]
+    if not pos and "geo" in mv_net.bus.columns:
+        for b in mv_net.bus.index:
+            if b not in MG:
+                continue
+            g = mv_net.bus.at[b, "geo"]
+            if g is None:
+                continue
+            # oft als String im GeoJSON-Format
+            if isinstance(g, str):
+                try:
+                    d = json.loads(g)
+                    x, y = d["coordinates"]
+                    pos[b] = (x, y)
+                except Exception:
+                    pass
+
+    # 4) Fallback: schnelles Layout (NICHT spring_layout)
+    if not pos:
+        print("Keine Geodaten gefunden -> random_layout als Fallback.")
+        t0 = time.perf_counter()
+        pos = nx.random_layout(MG, seed=1)
+        print("Layout seconds:", time.perf_counter() - t0)
+    return pos
+
+
+if __name__ == '__main__':
+    #
+    #codes = sb.collect_all_simbench_codes()
+    #print(codes)
+    ##SGS 1-MVLV-rural-all-2 ~ 100
+#SGS 1-MVLV-urban-all-2-sw ~ 170
+
+    grid_mv1= "1-MVLV-rural-all-0-no_sw"
+    # #grid0 = '1-LV-rural1--1-no_sw'
+    mv_net = sb.get_simbench_net(grid_mv1)
+    # print("get Simbench")
+    MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
+    # print("simbench to networkx")
+    # print("Nodes:", MG.number_of_nodes())
+    # print("Edges:", MG.number_of_edges())
+    # print("Is empty:", MG.number_of_nodes() == 0)
+    # pos = positions(mv_net)
+    # plt.figure(figsize=(12, 9), dpi=150)
+    # nx.draw_networkx_edges(MG, pos, width=0.2, alpha=0.3)
+    # nx.draw_networkx_nodes(MG, pos, node_size=2)
+    # plt.axis("off")
+    # plt.tight_layout()
+    # plt.show()
+
+    # with open("1-MV-rural--0-sw_graph.pkl", 'rb') as outfile:
+    #     MG = pickle.load(outfile)
+    # G = Cigre_Sampled(MG=MG, router_reduced=0.5)
+    # G.plot(legend=True)
