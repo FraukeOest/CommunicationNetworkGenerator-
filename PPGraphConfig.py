@@ -3,15 +3,26 @@ from PhysGraph import PhysGraph
 import numpy as np
 import pickle
 from scipy.spatial import cKDTree
-from re import search
+from re import search, sub
 import os
 import IctConfig
 from pathlib import Path
 import simbench as sb
-import pandapower
+import matplotlib.pyplot as plt
 import json
 import time
-import matplotlib.pyplot as plt
+import logging
+from datetime import datetime as dt
+logger = logging.getLogger(__name__)
+formatter = logging.Formatter('%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+                                  '%Y-%m-%d:%H:%M:%S')
+logger.setLevel(logging.DEBUG)
+now_dt = dt.now()
+formatted_dt = now_dt.strftime("%Y-%m-%d_%H_%M")
+now = time.perf_counter()
+file_handler = logging.FileHandler(f'log/log_{formatted_dt}.log', 'w')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 import warnings
 warnings.filterwarnings(
     "ignore",
@@ -150,20 +161,38 @@ def _remove_middle_compoents(graph: PhysGraph):
         #print(neighbor)
         graph.add_edge(neighbor[0], neighbor[1])
         if "Trafo" in neighbor[1]:
+            print("found trafo")
             graph.remove_edge(n, neighbor[1])
         else:
             graph.remove_edge(n, neighbor[0])
     Trafo = [n for n in graph.nodes if 'Trafo' in n]
 
+    # busses = [n for n in graph.nodes if "Bus" in n]
+    # for n in busses:
+    #     neighbor = list(graph.neighbors(n))
+    #     if len(neighbor) > 1:
+    #         if "Bus" in neighbor[0] and "Bus" in neighbor[1]:
+    #             nx.contracted_edge(graph, (neighbor[0], n), self_loops=False, copy=False)
+    MV_Load = [n for n in graph.nodes if "MV" in n and "Load" in n]
+    for n in MV_Load:
+        neighbor = list(graph.neighbors(n))
+        if len(neighbor) > 1:
+            if "Bus" in neighbor[0] and "Bus" in neighbor[1]:
+                print(neighbor)
 
     for n in Trafo:
         neighbor = [n for n in graph.neighbors(n) if "Trafo" not in n]
         graph.add_edge(neighbor[0], neighbor[1])
         graph.remove_edge(n, neighbor[0])
 
-    lv_busses = [n for n in graph.nodes if "bus" in n]
+    lv_busses = [n for n in graph.nodes if "bus" in n or ("Bus" in n and "LV" in n)]
     for n in lv_busses:
         graph.remove_node(n)
+
+    degrees4 = [(n, d) for n, d in nx.degree(graph) if "Bus" in n and d <= 1]
+    while degrees4:
+        graph.remove_nodes_from(degrees4)
+        degrees4 = [n for n, d in graph.degree() if "Bus" in str(n) and d <= 1]
 
     router = [n for n in graph.nodes() if "Bus" in n]
     pos = nx.get_node_attributes(graph, 'pos')
@@ -178,46 +207,125 @@ def _remove_middle_compoents(graph: PhysGraph):
             graph.add_edge(iso_node, target, weight=10, lat=20)
 
     degrees = [(n, d) for n, d in nx.degree(graph) if not "Bus" in n and d > 1]
+    logger.info("finished fixing")
     if degrees:
+        logger.error(f"didnt delete all irrevant nodes that could act as router (but aren't): {degrees}")
         raise ValueError("didnt delete all irrevant nodes that could act as router (but aren't)")
     return graph
 
 
 def _rename_components(G):
     """renames former pandapower components to make easier distinguising between MV and LV, and to unify naming pattern"""
-    mapping = {n: n.replace('Residential ', 'LV_CHP_') for n in G.nodes if 'Residential' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Load R', 'MV_Load_') for n in G.nodes if 'Load R' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Load', 'MV_Load') for n in G.nodes if n.startswith('Load')}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('PV', 'MV_PV') for n in G.nodes if 'PV' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Battery ', 'MV_Bat_') for n in G.nodes if 'Battery' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('load', 'LV_Load_') for n in G.nodes if 'load' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('fuel cell ', 'LV_CHP_') for n in G.nodes if 'fuel' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Fuel cell ', 'MV_CHP_') for n in G.nodes if 'Fuel' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('CHP diesel ', 'LV_CHP_') for n in G.nodes if 'CHP diesel' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('gen', 'LV_PV_') for n in G.nodes if 'gen' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Bus ', 'R') for n in G.nodes if 'Bus' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Trafo', 'HVMV_Trafo') for n in G.nodes if 'Trafo' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('trafo', 'MVLV_trafo') for n in G.nodes if 'trafo' in n}
-    G = nx.relabel_nodes(G, mapping)
 
-    mapping = {
-        n: "LV_PV_" + n.split("SGen", 1)[1].strip()
-        for n in G.nodes
-        if "SGen" in n
-    }
-    G = nx.relabel_nodes(G, mapping)
+    nodes = G.nodes
+
+    if ('Residential' in nodes) and ('CHP diesel' in nodes) and ('Fuel' in nodes):
+        mapping = {n: n.replace('Residential ', 'LV_CHP_') for n in G.nodes if 'Residential' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('Load R', 'MV_Load_') for n in G.nodes if 'Load R' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('Load', 'MV_Load') for n in G.nodes if n.startswith('Load')}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('PV', 'MV_PV') for n in G.nodes if 'PV' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('Battery ', 'MV_Bat_') for n in G.nodes if 'Battery' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('load', 'LV_Load_') for n in G.nodes if 'load' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('fuel cell ', 'LV_CHP_') for n in G.nodes if 'fuel' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('Fuel cell ', 'MV_CHP_') for n in G.nodes if 'Fuel' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('CHP diesel ', 'LV_CHP_') for n in G.nodes if 'CHP diesel' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('gen', 'LV_PV_') for n in G.nodes if 'gen' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('Bus ', 'R') for n in G.nodes if 'Bus' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('Trafo', 'HVMV_Trafo') for n in G.nodes if 'Trafo' in n}
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: n.replace('trafo', 'MVLV_trafo') for n in G.nodes if 'trafo' in n}
+        G = nx.relabel_nodes(G, mapping)
+    else:
+        mapping = {
+            n: sub(r'(LV\d+)\.(\d+)\s+Bus\s*(\d+)', r'R\2\3_0', n)
+            for n in G.nodes()
+            if 'Bus' in n
+        }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {
+            n: sub(r'(MV\d+)\.(\d+)\s+Bus\s*(\d+)', r'R\2\3_1', n)
+            for n in G.nodes()
+            if 'Bus' in n
+        }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {
+            n: sub(r'HV(\d+)\s+Bus\s*(\d+)', r'R\2_2', n)
+            for n in G.nodes()
+            if 'Bus' in n
+        }
+        G = nx.relabel_nodes(G, mapping)
+
+        degrees4 = [(n, d) for n, d in nx.degree(G) if "R" in n and d <= 1]
+        if degrees4:
+            raise ValueError(f"router is end device L 266 {degrees4}")
+
+        mapping = {
+            n: sub(r'LV(\d+)\.(\d+)\s+SGen\s*(\d+)', r'LV_PV_\1\2\3', n)
+            for n in G.nodes
+            if "SGen" in n
+        }
+        G = nx.relabel_nodes(G, mapping)
+        mapping = {n: sub(r'(MV)(\d+)\.(\d+)-(LV)(\d+)\.(\d+)-Trafo\s*(\d*)', r'\1\4_trafo_\3\6', n)
+                   for n in G.nodes
+                   if "Trafo" in n and "LV" in n
+                   }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {n: sub(r'(HV)(\d+)-(MV)(\d+)\.(\d+)-Trafo\s*(\d*)', r'\1\3_Trafo_\2\5', n)
+                   for n in G.nodes
+                   if "Trafo" in n and "HV" in n
+                   }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {n: sub(r'MV(\d+)\.(\d+) MV\s*Load\s*(\d+)', r'MV_Load_\1\2\3_1', n)
+                   for n in G.nodes
+                   if "Load" in n and "MV" in n
+                   }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {n: sub(r'MV(\d+)\.(\d+) \s*Load\s*(\d+)', r'MV_Load_\1\2\3', n)
+                   for n in G.nodes
+                   if "Load" in n and "MV" in n
+                   }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {n: sub(r'LV(\d+)\.(\d+)\s*Load\s*(\d+)', r'LV_Load_\1\2\3', n)
+                   for n in G.nodes
+                   if "Load" in n and "LV" in n
+                   }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {n: sub(r'MV(\d+)\.(\d+) (MV)*\s*SGen\s*(\d+)', r'MV_PV_\1\2\4_\3', n)
+                   for n in G.nodes
+                   if "SGen" in n and "MV" in n
+                   }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {n: sub(r'MV\d+\.\d+ loop_line_switch (\d)\.(\d)', r'switch_\1\2', n)
+                   for n in G.nodes
+                   if 'switch' in n
+                   }
+        G = nx.relabel_nodes(G, mapping)
+
+        mapping = {n: sub(r'HV(\d+)_MV(\d*).(\d+)_load', r'MV_Load_\1\2\3_2', n)
+                   for n in G.nodes
+                   if 'load' in n and "HV" in n and "MV" in n
+                   }
+
+        G = nx.relabel_nodes(G, mapping)
 
     accepted_keys = ['HVMV_Trafo', 'MVLV_trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
                      'WKA','LV_PV', 'S']
@@ -368,21 +476,25 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w
 
 def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_degree=1,
                   comp_factor=1, br_edge=10, br_core=100, MG:nx.Graph = None):
-    try:
-        cycle_edges = list(nx.minimum_cycle_basis(MG))
-        G = PhysGraph(MG)
-    except:
-        print("fix graph")
-        G = _fix_graph_for_all_cycles(MG)
-
+    # try:
+    #     logger.info("test cycle edges")
+    #     cycle_edges = list(nx.minimum_cycle_basis(MG))
+    #     G = PhysGraph(MG)
+    # except:
+    #     logger.info("fix graph")
+    #     G = _fix_graph_for_all_cycles(MG)
+    G = PhysGraph(MG)
     G.remove_nodes_from(['S1', 'S2', 'S3'])  # these are not servers, but names for switches
-    print("remove middle components")
+    logger.info("remove middle components")
     G = _remove_middle_compoents(G)
     #degrees2 = [(n, d) for n, d in nx.degree(G) if d > 1]
     G = _rename_components(G)
     degrees3 = [(n, d) for n, d in nx.degree(G) if not "R" in n and d > 1]
     if degrees3:
         raise ValueError(f"OT device pretending to be a router {degrees3}")
+    degrees4 = [(n, d) for n, d in nx.degree(G) if "R" in n and d <= 1]
+    if degrees4:
+        raise ValueError(f"router is end device {degrees4}")
     router_for_server = find_server_place(G)
     ordered_places = sorted(router_for_server, key=lambda x: x[1], reverse=True) # todo sort in function
 
@@ -418,7 +530,7 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
     G.set_routers(routers)
     ot_devies = [v for v in all_nodes if v not in routers and v not in servers]
     G.set_ot_devices(ot_devies)
-    print("adjusting edge weight")
+    logger.info("adjusting edge weight")
     for u, v, d in G.edges(data=True):
         if 'R' in u and 'R' in v: # Core Network
             G[u][v]["weight"] = br_core
@@ -430,7 +542,7 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
             G[u][v]["weight"] = br_edge
             G[u][v]["lat"] = calc_transmission_lat_s(br_edge)
 
-    print("creating finegrained topology")
+    logger.info("creating finegrained topology")
     regard_rings = True
     if router_reduced < 1:
         G = _contract_router(G, router_reduced)
@@ -503,11 +615,11 @@ if __name__ == '__main__':
     ##SGS 1-MVLV-rural-all-2 ~ 100
 #SGS 1-MVLV-urban-all-2-sw ~ 170
 
-    grid_mv1= "1-MVLV-rural-all-0-no_sw"
-    # #grid0 = '1-LV-rural1--1-no_sw'
-    mv_net = sb.get_simbench_net(grid_mv1)
-    # print("get Simbench")
-    MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
+    # grid_mv1= "1-MVLV-rural-all-0-no_sw"
+    # # #grid0 = '1-LV-rural1--1-no_sw'
+    # mv_net = sb.get_simbench_net(grid_mv1)
+    # # print("get Simbench")
+    # MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
     # print("simbench to networkx")
     # print("Nodes:", MG.number_of_nodes())
     # print("Edges:", MG.number_of_edges())
@@ -519,8 +631,18 @@ if __name__ == '__main__':
     # plt.axis("off")
     # plt.tight_layout()
     # plt.show()
+    print("load graph")
+    file = "1-MVLV-rural-all-0-no_sw_graph.pkl"
+    #file = "cigre_MV_LV_Graph.pkl"
+    file = "1-MVLV-rural-1.108-0-no_sw_graph.pkl"
+    with open(file, 'rb') as outfile:
+        MG = pickle.load(outfile)
+    print("create phys graph")
+    G = Cigre_Sampled(MG=MG, router_reduced=0.5)
+    G.plot(legend=True)
+    # pos2 = nx.get_node_attributes(MG, "pos")
+    # nx.draw(MG, pos2, with_labels=True)
+    # nx.draw_networkx_edges(MG, pos2, width=2)
+    #
+    # plt.show()
 
-    # with open("1-MV-rural--0-sw_graph.pkl", 'rb') as outfile:
-    #     MG = pickle.load(outfile)
-    # G = Cigre_Sampled(MG=MG, router_reduced=0.5)
-    # G.plot(legend=True)
