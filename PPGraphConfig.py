@@ -153,6 +153,8 @@ def add_crossconnetions(G, list_of_overlay_links, br_core):
 def _remove_middle_compoents(graph: PhysGraph):
     """removes parts that are connected in the power grid line that are connected differently in the communication
     network (star-like)"""
+
+
     if not list(graph.nodes):
         raise ValueError("no nodes in Graph to be remodelled")
     switches = [n for n in graph.nodes if 'switch' in n]
@@ -165,7 +167,6 @@ def _remove_middle_compoents(graph: PhysGraph):
             graph.remove_edge(n, neighbor[1])
         else:
             graph.remove_edge(n, neighbor[0])
-    Trafo = [n for n in graph.nodes if 'Trafo' in n]
 
     # busses = [n for n in graph.nodes if "Bus" in n]
     # for n in busses:
@@ -179,7 +180,23 @@ def _remove_middle_compoents(graph: PhysGraph):
         if len(neighbor) > 1:
             if "Bus" in neighbor[0] and "Bus" in neighbor[1]:
                 print(neighbor)
+    degrees = [(n, d) for n, d in nx.degree(graph) if not "Bus" in n and d > 1]
+    if degrees:
+        for n, d in degrees:
+            bus_node = None
+            H = graph.copy()
+            neighbors = nx.neighbors(H, n)
+            if "Load" in n:
+                for nei in neighbors:
+                    if "Bus" in nei:
+                        bus_node = nei
+                    else:
+                        graph.remove_edge(n, nei)
+                if bus_node:
+                    for nei in neighbors:
+                        graph.add_edge(nei, bus_node)
 
+    Trafo = [n for n in graph.nodes if 'Trafo' in n]
     for n in Trafo:
         neighbor = [n for n in graph.neighbors(n) if "Trafo" not in n]
         graph.add_edge(neighbor[0], neighbor[1])
@@ -268,21 +285,22 @@ def _rename_components(G):
         }
         G = nx.relabel_nodes(G, mapping)
 
-        degrees4 = [(n, d) for n, d in nx.degree(G) if "R" in n and d <= 1]
-        if degrees4:
-            raise ValueError(f"router is end device L 266 {degrees4}")
-
         mapping = {
             n: sub(r'LV(\d+)\.(\d+)\s+SGen\s*(\d+)', r'LV_PV_\1\2\3', n)
             for n in G.nodes
             if "SGen" in n
         }
         G = nx.relabel_nodes(G, mapping)
-        mapping = {n: sub(r'(MV)(\d+)\.(\d+)-(LV)(\d+)\.(\d+)-Trafo\s*(\d*)', r'\1\4_trafo_\3\6', n)
+        mapping = {n: sub(r'MV(\d+)\.(\d+)-(LV)(\d+)\.(\d+)-Trafo\s*(\d*)', r'MVLV_trafo_\2\4\5', n)
                    for n in G.nodes
                    if "Trafo" in n and "LV" in n
                    }
         G = nx.relabel_nodes(G, mapping)
+
+        degrees4 = [(n, d) for n, d in nx.degree(G) if not "R" in n and d > 1]
+        if degrees4:
+            raise ValueError(f"router is end device L 307 {degrees4}")
+
 
         mapping = {n: sub(r'(HV)(\d+)-(MV)(\d+)\.(\d+)-Trafo\s*(\d*)', r'\1\3_Trafo_\2\5', n)
                    for n in G.nodes
@@ -337,6 +355,8 @@ def _rename_components(G):
     if len(accepted) < len(list(G.nodes)):
         dif = set(list(G.nodes)) - set(accepted)
         raise KeyError(f"missed components to consider renaming by {dif} ")
+
+
     return G
 
 def __create_public_topology(G):
@@ -634,11 +654,11 @@ if __name__ == '__main__':
     print("load graph")
     file = "1-MVLV-rural-all-0-no_sw_graph.pkl"
     #file = "cigre_MV_LV_Graph.pkl"
-    file = "1-MVLV-rural-1.108-0-no_sw_graph.pkl"
+    #file = "1-MVLV-rural-1.108-0-no_sw_graph.pkl"
     with open(file, 'rb') as outfile:
         MG = pickle.load(outfile)
     print("create phys graph")
-    G = Cigre_Sampled(MG=MG, router_reduced=0.5)
+    G = Cigre_Sampled(MG=MG, router_reduced=1)
     G.plot(legend=True)
     # pos2 = nx.get_node_attributes(MG, "pos")
     # nx.draw(MG, pos2, with_labels=True)
