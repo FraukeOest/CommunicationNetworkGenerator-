@@ -2,14 +2,32 @@ import networkx as nx
 from PhysGraph import PhysGraph
 import numpy as np
 import pickle
-from scipy.spatial import cKDTree
-from re import search
+from re import search, sub
 import os
 import IctConfig
 from pathlib import Path
 import simbench as sb
-import pandapower
-
+import matplotlib.pyplot as plt
+import json
+import time
+import logging
+from datetime import datetime as dt
+logger = logging.getLogger(__name__)
+formatter = logging.Formatter('%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+                                  '%Y-%m-%d:%H:%M:%S')
+logger.setLevel(logging.DEBUG)
+now_dt = dt.now()
+formatted_dt = now_dt.strftime("%Y-%m-%d_%H_%M")
+now = time.perf_counter()
+file_handler = logging.FileHandler(f'log/log_{formatted_dt}.log', 'w')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    message=r".*DataFrame concatenation with empty or all-NA entries.*"
+)
 
 def calc_transmission_lat_s(datarate):
     """calculates transmission delay in kByte"""
@@ -18,39 +36,6 @@ def calc_transmission_lat_s(datarate):
     return transmission_lat * 1000
 
 
-def _fix_graph_for_all_cycles(MG: nx.Graph):
-    """some edges might be wrongly generaged and need to readded to the graph
-        Params:
-            mg: Modelled Graph from pandapower-based networks
-        Returns:
-            G: PhysGraph()
-    """
-    G = PhysGraph()
-    edgesMG = list(MG.edges(data=False))
-
-    ctr = 0
-    for edge in edgesMG:
-        G.add_edge(str(edge[0]), str(edge[1]))
-        try:
-            cycle_edges = list(nx.minimum_cycle_basis(G))
-            ctr += 1
-        except Exception as e:
-            print(f"failed at {edge} number {ctr}")
-            print(f"Typen: {type(edge[0])} -- {type(edge[1])}")
-            G.remove_edge(edge[0], edge[1])
-    isolates = list(nx.isolates(MG))
-    if len(isolates) >= 1:
-        raise ValueError("There should not be any isolated nodes left ")
-    print(f"isolates: {isolates}")
-    G.add_nodes_from(isolates)
-    pos = nx.get_node_attributes(MG, 'pos')
-    p_mw = nx.get_node_attributes(MG, 'p_mw')
-    nx.set_node_attributes(G, values=pos, name='pos')
-    nx.set_node_attributes(G, values=p_mw, name='p_mw')
-
-    if len(list(G.nodes)) == 0:
-        raise ValueError("fixing failed, no nodes in graph")
-    return G
 
 def determine_crossconnection(G, nodes_list, r_n, a, b, c):
     """
@@ -131,90 +116,7 @@ def add_crossconnetions(G, list_of_overlay_links, br_core):
         G.add_edges_from([(u, v, {"weight": br_core, "lat": lat})])
     return G
 
-def _remove_middle_compoents(graph: PhysGraph):
-    """removes parts that are connected in the power grid line that are connected differently in the communication
-    network (star-like)"""
-    if not list(graph.nodes):
-        raise ValueError("no nodes in Graph to be remodelled")
-    switches = [n for n in graph.nodes if 'switch' in n]
-    for n in switches:
-        neighbor = list(graph.neighbors(n))
-        #print(neighbor)
-        graph.add_edge(neighbor[0], neighbor[1])
-        if "Trafo" in neighbor[1]:
-            graph.remove_edge(n, neighbor[1])
-        else:
-            graph.remove_edge(n, neighbor[0])
-    Trafo = [n for n in graph.nodes if 'Trafo' in n]
 
-
-    for n in Trafo:
-        neighbor = [n for n in graph.neighbors(n) if "Trafo" not in n]
-        graph.add_edge(neighbor[0], neighbor[1])
-        graph.remove_edge(n, neighbor[0])
-
-    lv_busses = [n for n in graph.nodes if "bus" in n]
-    for n in lv_busses:
-        graph.remove_node(n)
-
-    router = [n for n in graph.nodes() if "Bus" in n]
-    pos = nx.get_node_attributes(graph, 'pos')
-    isolates = list(nx.isolates(graph))
-    coords_router = np.array([pos[n] for n in router])
-    kdtree = cKDTree(coords_router)
-    coords_iso = np.array([pos[n] for n in isolates])
-    if len(coords_iso) > 1:
-        dists, idxs = kdtree.query(coords_iso, k=1)
-        for iso_node, connected_index in zip(isolates, idxs):
-            target = router[connected_index]
-            graph.add_edge(iso_node, target, weight=10, lat=20)
-
-    degrees = [(n, d) for n, d in nx.degree(graph) if not "Bus" in n and d > 1]
-    if degrees:
-        raise ValueError("didnt delete all irrevant nodes that could act as router (but aren't)")
-    return graph
-
-
-def _rename_components(G):
-    """renames former pandapower components to make easier distinguising between MV and LV, and to unify naming pattern"""
-    mapping = {n: n.replace('Residential ', 'LV_CHP_') for n in G.nodes if 'Residential' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Load R', 'MV_Load_') for n in G.nodes if 'Load R' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Load', 'MV_Load') for n in G.nodes if n.startswith('Load')}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('PV', 'MV_PV') for n in G.nodes if 'PV' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Battery ', 'MV_Bat_') for n in G.nodes if 'Battery' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('load', 'LV_Load_') for n in G.nodes if 'load' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('fuel cell ', 'LV_CHP_') for n in G.nodes if 'fuel' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Fuel cell ', 'MV_CHP_') for n in G.nodes if 'Fuel' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('CHP diesel ', 'LV_CHP_') for n in G.nodes if 'CHP diesel' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('gen', 'LV_PV_') for n in G.nodes if 'gen' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Bus ', 'R') for n in G.nodes if 'Bus' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('Trafo', 'HVMV_Trafo') for n in G.nodes if 'Trafo' in n}
-    G = nx.relabel_nodes(G, mapping)
-    mapping = {n: n.replace('trafo', 'MVLV_trafo') for n in G.nodes if 'trafo' in n}
-    G = nx.relabel_nodes(G, mapping)
-
-    accepted_keys = ['HVMV_Trafo', 'MVLV_trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
-                     'WKA','LV_PV', 'S']
-    accepted = []
-    for k in G.nodes:
-        for ak in accepted_keys:
-            if k.startswith(ak):
-                accepted.append(k)
-    if len(accepted) < len(list(G.nodes)):
-        dif = set(list(G.nodes)) - set(accepted)
-        raise KeyError(f"missed components to consider renaming by {dif} ")
-    return G
 
 def __create_public_topology(G):
     """ create one backbone node and let all acces router connect to it in a star topology
@@ -325,7 +227,36 @@ def find_server_place(G):
     normalized_ee = [1 if e > 0 else 0 for e in ee_occurances]
     output = [(n, d + s + e) for n, d, s, e in zip(nodes, degree, swtiches, normalized_ee)]
     return output
-
+def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100, regenerate=False):
+    """only generates a graph once for one parameterization combination.
+    If it already exists, it loads the pickled graph"""
+    print("load graph")
+    file = "1-MVLV-rural-all-0-no_sw_graph.pkl"
+    with open(file, 'rb') as outfile:
+        MG = pickle.load(outfile)
+    print("create phys graph")
+    G = Cigre_Sampled(MG=MG, router_reduced=1)
+    G.plot(legend=True)
+    graph_name = (f"1-MVLV-rural-all-0-no_sw_graph.pkl_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
+                  f"_comp_factor={comp_factor}_br_edge={br_edge}_core={br_core}.pkl")
+    cwd = Path.cwd()
+    parent = cwd.parent
+    graph_dir = parent / "graphs"
+    path = graph_dir / graph_name
+    if os.path.exists(path) and not regenerate:
+        graph = pickle.load(open(path, "rb"))
+        print(f"{graph_name} already.")
+    else:
+        BASE_DIR = Path(__file__).resolve().parent
+        pkl_path = BASE_DIR / "1-MVLV-rural-all-0-no_sw_graph.pkl"
+        with open(pkl_path,'rb') as outfile:
+                MG = pickle.load(outfile)
+        graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
+                                   comp_factor=comp_factor, br_edge=br_edge, br_core=br_core, MG=MG)
+        if not regenerate:
+            pickle.dump(graph, open(path, "wb"))
+            print(f"{graph_name} was not found.")
+    return graph
 
 def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100, regenerate=False):
     """only generates a graph once for one parameterization combination.
@@ -353,21 +284,9 @@ def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w
 
 def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_degree=1,
                   comp_factor=1, br_edge=10, br_core=100, MG:nx.Graph = None):
-    try:
-        cycle_edges = list(nx.minimum_cycle_basis(MG))
-        G = PhysGraph(MG)
-    except:
-        print("fix graph")
-        G = _fix_graph_for_all_cycles(MG)
 
-    G.remove_nodes_from(['S1', 'S2', 'S3'])  # these are not servers, but names for switches
-    print("remove middle components")
-    G = _remove_middle_compoents(G)
-    #degrees2 = [(n, d) for n, d in nx.degree(G) if d > 1]
-    G = _rename_components(G)
-    degrees3 = [(n, d) for n, d in nx.degree(G) if not "R" in n and d > 1]
-    if degrees3:
-        raise ValueError(f"OT device pretending to be a router {degrees3}")
+    G = PhysGraph(MG)
+
     router_for_server = find_server_place(G)
     ordered_places = sorted(router_for_server, key=lambda x: x[1], reverse=True) # todo sort in function
 
@@ -403,7 +322,7 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
     G.set_routers(routers)
     ot_devies = [v for v in all_nodes if v not in routers and v not in servers]
     G.set_ot_devices(ot_devies)
-    print("adjusting edge weight")
+    logger.info("adjusting edge weight")
     for u, v, d in G.edges(data=True):
         if 'R' in u and 'R' in v: # Core Network
             G[u][v]["weight"] = br_core
@@ -415,7 +334,7 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
             G[u][v]["weight"] = br_edge
             G[u][v]["lat"] = calc_transmission_lat_s(br_edge)
 
-    print("creating finegrained topology")
+    logger.info("creating finegrained topology")
     regard_rings = True
     if router_reduced < 1:
         G = _contract_router(G, router_reduced)
@@ -442,16 +361,80 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
     return G
 
 
-if __name__ == '__main__':
-    grid = '1-LV-rural1--1-no_sw'
-    #mv_net = sb.get_simbench_net(grid)
-    #MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
-    with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
-        MG = pickle.load(outfile)
+def positions(mv_net):
+    pos = {}
+    # 1) Falls bus_geodata existiert (bei dir offenbar nicht)
+    if hasattr(mv_net, "bus_geodata"):
+        if len(mv_net.bus_geodata.index) > 0 and {"x", "y"}.issubset(mv_net.bus_geodata.columns):
+            pos = {b: (mv_net.bus_geodata.at[b, "x"], mv_net.bus_geodata.at[b, "y"])
+                   for b in mv_net.bus_geodata.index if b in MG}
 
-    G = Cigre_Sampled(MG=MG, router_reduced=0.5)
-    unused_server = G.servers[11:]
-    G.servers = G.servers[0:11]
-    for s in unused_server:
-        G.remove_node(s.name)
+    # 2) Manche Netze haben x/y direkt in net.bus
+    if not pos and {"x", "y"}.issubset(getattr(mv_net, "bus", []).columns):
+        pos = {b: (mv_net.bus.at[b, "x"], mv_net.bus.at[b, "y"])
+               for b in mv_net.bus.index if b in MG}
+
+    # 3) Oder GeoJSON-artig in net.bus["geo"]
+    if not pos and "geo" in mv_net.bus.columns:
+        for b in mv_net.bus.index:
+            if b not in MG:
+                continue
+            g = mv_net.bus.at[b, "geo"]
+            if g is None:
+                continue
+            # oft als String im GeoJSON-Format
+            if isinstance(g, str):
+                try:
+                    d = json.loads(g)
+                    x, y = d["coordinates"]
+                    pos[b] = (x, y)
+                except Exception:
+                    pass
+
+    # 4) Fallback: schnelles Layout (NICHT spring_layout)
+    if not pos:
+        print("Keine Geodaten gefunden -> random_layout als Fallback.")
+        t0 = time.perf_counter()
+        pos = nx.random_layout(MG, seed=1)
+        print("Layout seconds:", time.perf_counter() - t0)
+    return pos
+
+
+if __name__ == '__main__':
+    #
+    #codes = sb.collect_all_simbench_codes()
+    #print(codes)
+    ##SGS 1-MVLV-rural-all-2 ~ 100
+#SGS 1-MVLV-urban-all-2-sw ~ 170
+
+    # grid_mv1= "1-MVLV-rural-all-0-no_sw"
+    # # #grid0 = '1-LV-rural1--1-no_sw'
+    # mv_net = sb.get_simbench_net(grid_mv1)
+    # # print("get Simbench")
+    # MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
+    # print("simbench to networkx")
+    # print("Nodes:", MG.number_of_nodes())
+    # print("Edges:", MG.number_of_edges())
+    # print("Is empty:", MG.number_of_nodes() == 0)
+    # pos = positions(mv_net)
+    # plt.figure(figsize=(12, 9), dpi=150)
+    # nx.draw_networkx_edges(MG, pos, width=0.2, alpha=0.3)
+    # nx.draw_networkx_nodes(MG, pos, node_size=2)
+    # plt.axis("off")
+    # plt.tight_layout()
+    # plt.show()
+    print("load graph")
+    file = "1-MVLV-rural-all-0-no_sw_graph.pkl"
+    #file = "cigre_MV_LV_Graph.pkl"
+    #file = "1-MVLV-rural-1.108-0-no_sw_graph.pkl"
+    with open(file, 'rb') as outfile:
+        MG = pickle.load(outfile)
+    print("create phys graph")
+    G = Cigre_Sampled(MG=MG, router_reduced=1)
     G.plot(legend=True)
+    # pos2 = nx.get_node_attributes(MG, "pos")
+    # nx.draw(MG, pos2, with_labels=True)
+    # nx.draw_networkx_edges(MG, pos2, width=2)
+    #
+    # plt.show()
+
