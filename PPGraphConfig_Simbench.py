@@ -231,12 +231,12 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
     print("load graph")
-    file = "1-MVLV-rural-all-0-no_sw_graph.pkl"
-    with open(file, 'rb') as outfile:
-        MG = pickle.load(outfile)
-    print("create phys graph")
-    G = Cigre_Sampled(MG=MG, router_reduced=1)
-    G.plot(legend=True)
+    file = "1-MVLV-rural-all-0-no_sw_graph_fixed.pkl"
+    # with open(file, 'rb') as outfile:
+    #     MG = pickle.load(outfile)
+    # print("create phys graph")
+    # G = Cigre_Sampled(MG=MG, router_reduced=1)
+    # G.plot(legend=True)
     graph_name = (f"1-MVLV-rural-all-0-no_sw_graph.pkl_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
                   f"_comp_factor={comp_factor}_br_edge={br_edge}_core={br_core}.pkl")
     cwd = Path.cwd()
@@ -248,7 +248,7 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
         print(f"{graph_name} already.")
     else:
         BASE_DIR = Path(__file__).resolve().parent
-        pkl_path = BASE_DIR / "1-MVLV-rural-all-0-no_sw_graph.pkl"
+        pkl_path = BASE_DIR / "1-MVLV-rural-all-0-no_sw_graph_fixed.pkl"
         with open(pkl_path,'rb') as outfile:
                 MG = pickle.load(outfile)
         graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
@@ -256,6 +256,8 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
         if not regenerate:
             pickle.dump(graph, open(path, "wb"))
             print(f"{graph_name} was not found.")
+    if not nx.is_connected(graph):
+        raise nx.NetworkXError("Graph is not connected")
     return graph
 
 def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100, regenerate=False):
@@ -289,7 +291,6 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
 
     router_for_server = find_server_place(G)
     ordered_places = sorted(router_for_server, key=lambda x: x[1], reverse=True) # todo sort in function
-
 
     all_nodes = G.nodes()
     #servers = [f'S{i}' for i in range(len(router_for_server))]
@@ -409,32 +410,13 @@ if __name__ == '__main__':
 
     # grid_mv1= "1-MVLV-rural-all-0-no_sw"
     # # #grid0 = '1-LV-rural1--1-no_sw'
-    # mv_net = sb.get_simbench_net(grid_mv1)
-    # # print("get Simbench")
-    # MG = pandapower.topology.create_nxgraph(mv_net, multi=True, include_switches=True, respect_switches=False)
-    # print("simbench to networkx")
-    # print("Nodes:", MG.number_of_nodes())
-    # print("Edges:", MG.number_of_edges())
-    # print("Is empty:", MG.number_of_nodes() == 0)
-    # pos = positions(mv_net)
-    # plt.figure(figsize=(12, 9), dpi=150)
-    # nx.draw_networkx_edges(MG, pos, width=0.2, alpha=0.3)
-    # nx.draw_networkx_nodes(MG, pos, node_size=2)
-    # plt.axis("off")
-    # plt.tight_layout()
-    # plt.show()
+
     print("load graph")
     file = "1-MVLV-rural-all-0-no_sw_graph.pkl"
-    #file = "cigre_MV_LV_Graph.pkl"
-    #file = "1-MVLV-rural-1.108-0-no_sw_graph.pkl"
-    with open(file, 'rb') as outfile:
-        MG = pickle.load(outfile)
-    print("create phys graph")
-    G = Cigre_Sampled(MG=MG, router_reduced=1)
-    G.plot(legend=True)
-    # pos2 = nx.get_node_attributes(MG, "pos")
-    # nx.draw(MG, pos2, with_labels=True)
-    # nx.draw_networkx_edges(MG, pos2, width=2)
-    #
-    # plt.show()
+    # with open(file, 'rb') as outfile:
+    #     MG = pickle.load(outfile)
+    # print("create phys graph")
+    # G = Cigre_Sampled(MG=MG, router_reduced=1)
+    #G.plot(legend=True)
+
 

@@ -6,6 +6,12 @@ import time
 from scipy.spatial import cKDTree
 from re import search, sub
 import logging
+import pandapower.topology as top
+import simbench as sb
+import json
+import pandas as pd
+import networkx as nx
+import pandapower.plotting as ppplot
 from datetime import datetime as dt
 logger = logging.getLogger(__name__)
 formatter = logging.Formatter('%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
@@ -115,7 +121,7 @@ def _remove_middle_compoents(graph: PhysGraph):
         graph.remove_nodes_from(degrees4)
         degrees4 = [n for n, d in graph.degree() if "Bus" in str(n) and d <= 1]
 
-    router = [n for n in graph.nodes() if "Bus" in n]
+    router = [n for n in graph.nodes() if "busbar" in n]
     pos = nx.get_node_attributes(graph, 'pos')
     isolates = list(nx.isolates(graph))
     coords_router = np.array([pos[n] for n in router])
@@ -265,18 +271,26 @@ def _rename_components(G):
 
 
 def repairing_graph(MG):
-    try:
-        logger.info("test cycle edges")
-        cycle_edges = list(nx.minimum_cycle_basis(MG))
-        G = PhysGraph(MG)
-    except:
-        logger.info("fix graph")
-        G = _fix_graph_for_all_cycles(MG)
+    G = PhysGraph(MG)
+    components = list(nx.connected_components(G))  # Liste von Sets mit Knoten
+    # try:
+    #     logger.info("test cycle edges")
+    #     cycle_edges = list(nx.minimum_cycle_basis(MG))
+    #     G = PhysGraph(MG)
+    # except:
+    #     logger.info("fix graph")
+    #     G = _fix_graph_for_all_cycles(MG)
+    if not nx.is_connected(G):
+        raise nx.NetworkXError("Graph is not connected after fixing")
     G.remove_nodes_from(['S1', 'S2', 'S3'])  # these are not servers, but names for switches
     logger.info("remove middle components")
     G = _remove_middle_compoents(G)
+    if not nx.is_connected(G):
+        raise nx.NetworkXError("Graph is not connected after removing middle components")
     #degrees2 = [(n, d) for n, d in nx.degree(G) if d > 1]
     G = _rename_components(G)
+    if not nx.is_connected(G):
+        raise nx.NetworkXError("Graph is not connected after renaming components")
     degrees3 = [(n, d) for n, d in nx.degree(G) if not "R" in n and d > 1]
     if degrees3:
         raise ValueError(f"OT device pretending to be a router {degrees3}")
@@ -285,11 +299,167 @@ def repairing_graph(MG):
         raise ValueError(f"router is end device {degrees4}")
     return G
 
-file = "1-MVLV-rural-all-0-no_sw_graph.pkl"
-with open(file, 'rb') as outfile:
-    MG = pickle.load(outfile)
+
+def determine_smallest_grid():
+    # Alle kombinierten MV+LV-Netze (MVLV) holen
+    codes = sb.collect_all_simbench_codes(
+        hv_level="MV",
+        lv_level="LV",
+        scenario=0,          # Szenario fixieren (Bus-Anzahl bleibt i.d.R. gleich)
+        breaker_rep=None,    # beide Varianten zulassen (sw / no_sw)
+        all_data=True
+    )
+
+    best = None  # (n_buses, code)
+
+    for code in codes:
+        net = sb.get_simbench_net(code)
+        n_buses = len(net.bus)
+        if best is None or n_buses < best[0]:
+            best = (n_buses, code)
+
+    print("Kleinstes MV+LV-Netz:", best[1])
+    print("Anzahl Busse:", best[0])
+
+
+    #Kleinstes MV+LV-Netz: 1-MVLV-rural-1.108-0-no_sw
+    #Anzahl Busse: 109
+
+def voltage_level(vn_kv: float) -> str:
+    if vn_kv < 1.0:
+        return "LV"          # Niederspannung
+    elif vn_kv < 60.0:
+        return "MV"          # Mittelspannung
+    else:
+        return "HV"          # Hochspannung
+
+
+def power(G, net):
+    def sum_pq_by_bus(df: pd.DataFrame, bus_col="bus", p_col="p_mw", q_col="q_mvar"):
+        if df is None or len(df) == 0 or bus_col not in df.columns:
+            return pd.Series(dtype=float), pd.Series(dtype=float)
+
+        d = df.copy()
+        if "in_service" in d.columns:
+            d = d[d["in_service"].astype(bool)]
+
+        p = d.groupby(bus_col)[p_col].sum() if p_col in d.columns else pd.Series(dtype=float)
+        q = d.groupby(bus_col)[q_col].sum() if q_col in d.columns else pd.Series(dtype=float)
+        return p, q
+
+    p_load, q_load = sum_pq_by_bus(net.load)
+    p_sgen, q_sgen = sum_pq_by_bus(net.sgen)
+    p_gen, q_gen = sum_pq_by_bus(net.gen)
+    p_sto, q_sto = sum_pq_by_bus(getattr(net, "storage", pd.DataFrame()))
+
+    attrs = {}
+    for b in G.nodes:
+        pl = float(p_load.get(b, 0.0));
+        ql = float(q_load.get(b, 0.0))
+        pg = float(p_gen.get(b, 0.0));
+        qg = float(q_gen.get(b, 0.0))
+        ps = float(p_sgen.get(b, 0.0));
+        qs = float(q_sgen.get(b, 0.0))
+        pst = float(p_sto.get(b, 0.0));
+        qst = float(q_sto.get(b, 0.0))
+
+        # Netto-Injektion: Erzeugung minus Last (Storage hier als "Erzeuger" mit Vorzeichen aus Tabelle)
+        p_net = (pg + ps + pst) - pl
+        q_net = (qg + qs + qst) - ql
+
+        attrs[b] = {
+            "p_load_mw": pl, "q_load_mvar": ql,
+            "p_gen_mw": pg, "q_gen_mvar": qg,
+            "p_sgen_mw": ps, "q_sgen_mvar": qs,
+            "p_net_mw": p_net, "q_net_mvar": q_net,
+        }
+
+    nx.set_node_attributes(G, attrs)
+    return G
+
+
+def determine_type(G, net):
+    bus_ids = list(G.nodes)
+    bus_df = net.bus.loc[bus_ids, ["name", "vn_kv", "zone"]]
+    # print(bus_df.head())
+    mapping = {i: f"{net.bus.at[i, 'name']} ({i})" for i in net.bus.index}
+    types = {bus: "bus" for bus in G.nodes}
+
+    for bus in net.ext_grid["bus"].tolist():
+        types[bus] = "slack"
+
+    for bus in net.gen["bus"].tolist():
+        types[bus] = "gen"
+
+    for bus in net.sgen["bus"].tolist():
+        types[bus] = "sgen"
+    for bus in net.storage["bus"].tolist():
+        types[bus] = "storage"
+    for bus in net.load["bus"].tolist():
+        types[bus] = "load" if types.get(bus) == "bus" else types[bus] + "+load"
+
+    level = {bus: voltage_level(net.bus.at[bus, "vn_kv"]) for bus in G.nodes}
+    nx.set_node_attributes(G, level, name="level")
+
+    nx.set_node_attributes(G, {b: (b in set(net.trafo["hv_bus"])) for b in G.nodes}, name="hv_trafo")
+    nx.set_node_attributes(G, {b: (b in set(net.trafo["lv_bus"])) for b in G.nodes}, name="lv_trafo")
+    nx.set_node_attributes(G, types, name="type")
+    # nx.set_node_attributes(G, net.bus["type"].to_dict(), name="type")
+    MG = nx.relabel_nodes(G, mapping, copy=True)
+
+    return MG
+
+
+def determine_pos(G, net):
+    # 1) Falls keine Geoda, ten vorhanden sind: generische Koordinaten erzeugen
+    if "geo" not in net.bus.columns or net.bus["geo"].isna().all():
+        ppplot.create_generic_coordinates(net, geodata_table="bus", overwrite=True)  # schreibt nach net.bus.geo
+        #                                  ^^^^^^^^^^^^^^^
+        # siehe Doku (geodata_table) :contentReference[oaicite:1]{index=1}
+
+    def point_from_geo(val):
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return None
+        obj = json.loads(val) if isinstance(val, str) else val
+        if obj.get("type") != "Point":
+            return None
+        x, y = obj["coordinates"][:2]
+        return (x, y)
+
+    # 2) pos-Attribut setzen (Bus-Index = Node-ID)
+    pos = {}
+    for bus in G.nodes:
+        if bus in net.bus.index:
+            p = point_from_geo(net.bus.at[bus, "geo"])
+            if p is not None:
+                pos[bus] = p
+
+    nx.set_node_attributes(G, pos, name="pos")
+
+    # # optional: x/y separat
+    # nx.set_node_attributes(G, {b: p[0] for b, p in pos.items()}, name="x")
+    # nx.set_node_attributes(G, {b: p[1] for b, p in pos.items()}, name="y")
+    return G
+
+sb_code = "1-MVLV-rural-1.108-0-no_sw"   # Beispiel 1-MVLV-urban-all-0-sw
+net = sb.get_simbench_net(sb_code)
+
+G = top.create_nxgraph(
+    net,
+    respect_switches=True,   # offene Schalter trennen Kanten
+    include_lines=True,
+    include_trafos=True
+)
+if not nx.is_connected(G):
+    raise nx.NetworkXError("Graph is not connected after fixing")
+G = determine_pos(G, net)
+MG = determine_type(G, net)
+#nx.set_node_attributes(G, net.bus["type"].to_dict(), name="type")
+#file = "1-MVLV-rural-1.108-0-no_sw_graph.pkl"
+# with open(file, 'rb') as outfile:
+#     MG = pickle.load(outfile)
 
 G = repairing_graph(MG)
 
-file2 = "1-MVLV-rural-all-0-no_sw_graph_fixed.pkl"
+file2 = f"{sb_code}_fixed.pkl"
 pickle.dump(G, open(file2, "wb"))
