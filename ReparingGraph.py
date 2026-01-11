@@ -68,67 +68,40 @@ def _remove_middle_compoents(graph: PhysGraph):
 
     if not list(graph.nodes):
         raise ValueError("no nodes in Graph to be remodelled")
-
-    for node in graph.nodes(data=True):
-        if node["type"] == "bus":
-            if node["voltage_level"] == "LV":
-                graph = delete_node(graph, node)
-
-    # switches = [n for n in graph.nodes if 'switch' in n]
-    # for n in switches:
-    #     neighbor = list(graph.neighbors(n))
-    #     #print(neighbor)
-    #     graph.add_edge(neighbor[0], neighbor[1])
-    #     if "Trafo" in neighbor[1]:
-    #         print("found trafo")
-    #         graph.remove_edge(n, neighbor[1])
-    #     else:
-    #         graph.remove_edge(n, neighbor[0])
-
+    cycles = list(nx.minimum_cycle_basis(G, weight=None))
+    print(f"cycles: {len(cycles)}")
+    ctr = 0
+    while True:
+        finished = True
+        H = graph.copy()
+        print(graph.number_of_nodes())
+        for node, attr in H.nodes(data=True):
+            if attr["type"] == "bus":
+                if attr["voltage_level"] == "LV" or attr["voltage_level"] == "MV":
+                    graph = delete_node(graph, node)
+                    continue
+                if graph.degree[node] <= 1:
+                    graph.remove_node(node)
+                    finished = False
+        ctr +=1
+        print("counter: ", ctr)
+        if finished:
+            break
+    cycles = list(nx.minimum_cycle_basis(G, weight=None))
+    print(f"cycles: {len(cycles)}")
     # busses = [n for n in graph.nodes if "Bus" in n]
     # for n in busses:
     #     neighbor = list(graph.neighbors(n))
     #     if len(neighbor) > 1:
     #         if "Bus" in neighbor[0] and "Bus" in neighbor[1]:
     #             nx.contracted_edge(graph, (neighbor[0], n), self_loops=False, copy=False)
-    MV_Load = [n for n in graph.nodes if "MV" in n and "Load" in n]
-    for n in MV_Load:
-        neighbor = list(graph.neighbors(n))
-        if len(neighbor) > 1:
-            if "Bus" in neighbor[0] and "Bus" in neighbor[1]:
-                print(neighbor)
-    degrees = [(n, d) for n, d in nx.degree(graph) if not "Bus" in n and d > 1]
-    if degrees:
-        for n, d in degrees:
-            bus_node = None
-            H = graph.copy()
-            neighbors = nx.neighbors(H, n)
-            if "Load" in n:
-                for nei in neighbors:
-                    if "Bus" in nei:
-                        bus_node = nei
-                    else:
-                        graph.remove_edge(n, nei)
-                if bus_node:
-                    for nei in neighbors:
-                        graph.add_edge(nei, bus_node)
-
-    Trafo = [n for n in graph.nodes if 'Trafo' in n]
-    for n in Trafo:
-        neighbor = [n for n in graph.neighbors(n) if "Trafo" not in n]
-        graph.add_edge(neighbor[0], neighbor[1])
-        graph.remove_edge(n, neighbor[0])
-
-    lv_busses = [n for n in graph.nodes if "bus" in n or ("Bus" in n and "LV" in n)]
-    for n in lv_busses:
-        graph.remove_node(n)
 
     degrees4 = [(n, d) for n, d in nx.degree(graph) if "Bus" in n and d <= 1]
     while degrees4:
         graph.remove_nodes_from(degrees4)
         degrees4 = [n for n, d in graph.degree() if "Bus" in str(n) and d <= 1]
 
-    router = [n for n in graph.nodes() if "busbar" in n]
+    router = [n for n in graph.nodes(data=True) if n[1]["type"]=="bus"]
     pos = nx.get_node_attributes(graph, 'pos')
     isolates = list(nx.isolates(graph))
     coords_router = np.array([pos[n] for n in router])
@@ -139,7 +112,8 @@ def _remove_middle_compoents(graph: PhysGraph):
         for iso_node, connected_index in zip(isolates, idxs):
             target = router[connected_index]
             graph.add_edge(iso_node, target, weight=10, lat=20)
-
+    nx.draw(graph, with_labels=True)
+    plt.show()
     degrees = [(n, d) for n, d in nx.degree(graph) if not "Bus" in n and d > 1]
     logger.info("finished fixing")
     if degrees:
@@ -156,8 +130,7 @@ def _rename_components(G):
                 nbrs = list(G.neighbors(node[0]))
                 new_name = f"R_{G.nodes[nbrs[0]]['b_id']}"
                 nx.relabel_nodes(G, {nbrs[0]: new_name}, copy=False)
-    nx.draw(G, with_labels=True)
-    plt.show()
+
 
     accepted_keys = ['HVMV_Trafo', 'MVLV_Trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
                      'WKA','LV_PV', 'S', 'Bus', 'MV_BM', 'MV_Hydro', 'MV_WP']
@@ -169,9 +142,8 @@ def _rename_components(G):
     if len(accepted) < len(list(G.nodes)):
         dif = set(list(G.nodes)) - set(accepted)
         raise KeyError(f"missed components to consider renaming by {dif} ")
-    nx.draw(G, with_labels=True)
-    plt.show()
-    #return G
+
+    return G
 
 
 
@@ -249,6 +221,7 @@ def create_node(G, asset, type):
         else:
             raise ValueError("no rule for this asset")
     pos = G.nodes[bus]['pos']
+    pos = (pos[0], pos[0] + 1)
     if "p_mw" in asset:
         p_mv = asset["p_mw"]
         G.add_node(asset_name, pos=pos, p_mv=p_mv, type=type)
@@ -258,8 +231,8 @@ def create_node(G, asset, type):
     return G
 
 def delete_node(G, node):
-    nbrs = list(G.neighbors(node[0]))
-    if len(nbrs) > 1:
+    nbrs = list(G.neighbors(node))
+    if len(nbrs) == 2:
         G.add_edge(nbrs[0], nbrs[1])
         G.remove_node(node)
     return G
@@ -283,7 +256,7 @@ def determine_type(G, net):
             vl = "HV"
         else:
             raise ValueError("no voltage level rule for this asset")
-        G.nodes[ix]["voltage_level  "] = vl
+        G.nodes[ix]["voltage_level"] = vl
         new_name = f"Bus_{ix}"
         mapping[ix] = new_name
 
