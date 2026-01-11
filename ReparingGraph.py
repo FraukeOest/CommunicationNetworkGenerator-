@@ -11,6 +11,7 @@ import simbench as sb
 import json
 import pandas as pd
 import networkx as nx
+import matplotlib.pyplot as plt
 import pandapower.plotting as ppplot
 from datetime import datetime as dt
 logger = logging.getLogger(__name__)
@@ -67,16 +68,22 @@ def _remove_middle_compoents(graph: PhysGraph):
 
     if not list(graph.nodes):
         raise ValueError("no nodes in Graph to be remodelled")
-    switches = [n for n in graph.nodes if 'switch' in n]
-    for n in switches:
-        neighbor = list(graph.neighbors(n))
-        #print(neighbor)
-        graph.add_edge(neighbor[0], neighbor[1])
-        if "Trafo" in neighbor[1]:
-            print("found trafo")
-            graph.remove_edge(n, neighbor[1])
-        else:
-            graph.remove_edge(n, neighbor[0])
+
+    for node in graph.nodes(data=True):
+        if node["type"] == "bus":
+            if node["voltage_level"] == "LV":
+                graph = delete_node(graph, node)
+
+    # switches = [n for n in graph.nodes if 'switch' in n]
+    # for n in switches:
+    #     neighbor = list(graph.neighbors(n))
+    #     #print(neighbor)
+    #     graph.add_edge(neighbor[0], neighbor[1])
+    #     if "Trafo" in neighbor[1]:
+    #         print("found trafo")
+    #         graph.remove_edge(n, neighbor[1])
+    #     else:
+    #         graph.remove_edge(n, neighbor[0])
 
     # busses = [n for n in graph.nodes if "Bus" in n]
     # for n in busses:
@@ -143,120 +150,17 @@ def _remove_middle_compoents(graph: PhysGraph):
 
 def _rename_components(G):
     """renames former pandapower components to make easier distinguising between MV and LV, and to unify naming pattern"""
+    H = G.copy()
+    for node in H.nodes(data=True):
+            if node[1]["type"] == "trafo":
+                nbrs = list(G.neighbors(node[0]))
+                new_name = f"R_{G.nodes[nbrs[0]]['b_id']}"
+                nx.relabel_nodes(G, {nbrs[0]: new_name}, copy=False)
+    nx.draw(G, with_labels=True)
+    plt.show()
 
-    nodes = G.nodes
-
-    if ('Residential' in nodes) and ('CHP diesel' in nodes) and ('Fuel' in nodes):
-        mapping = {n: n.replace('Residential ', 'LV_CHP_') for n in G.nodes if 'Residential' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('Load R', 'MV_Load_') for n in G.nodes if 'Load R' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('Load', 'MV_Load') for n in G.nodes if n.startswith('Load')}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('PV', 'MV_PV') for n in G.nodes if 'PV' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('Battery ', 'MV_Bat_') for n in G.nodes if 'Battery' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('load', 'LV_Load_') for n in G.nodes if 'load' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('fuel cell ', 'LV_CHP_') for n in G.nodes if 'fuel' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('Fuel cell ', 'MV_CHP_') for n in G.nodes if 'Fuel' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('CHP diesel ', 'LV_CHP_') for n in G.nodes if 'CHP diesel' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('gen', 'LV_PV_') for n in G.nodes if 'gen' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('Bus ', 'R') for n in G.nodes if 'Bus' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('Trafo', 'HVMV_Trafo') for n in G.nodes if 'Trafo' in n}
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: n.replace('trafo', 'MVLV_trafo') for n in G.nodes if 'trafo' in n}
-        G = nx.relabel_nodes(G, mapping)
-    else:
-        mapping = {
-            n: sub(r'(LV\d+)\.(\d+)\s+Bus\s*(\d+)', r'R\2\3_0', n)
-            for n in G.nodes()
-            if 'Bus' in n
-        }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {
-            n: sub(r'(MV\d+)\.(\d+)\s+Bus\s*(\d+)', r'R\2\3_1', n)
-            for n in G.nodes()
-            if 'Bus' in n
-        }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {
-            n: sub(r'HV(\d+)\s+Bus\s*(\d+)', r'R\2_2', n)
-            for n in G.nodes()
-            if 'Bus' in n
-        }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {
-            n: sub(r'LV(\d+)\.(\d+)\s+SGen\s*(\d+)', r'LV_PV_\1\2\3', n)
-            for n in G.nodes
-            if "SGen" in n
-        }
-        G = nx.relabel_nodes(G, mapping)
-        mapping = {n: sub(r'MV(\d+)\.(\d+)-(LV)(\d+)\.(\d+)-Trafo\s*(\d*)', r'MVLV_trafo_\2\4\5', n)
-                   for n in G.nodes
-                   if "Trafo" in n and "LV" in n
-                   }
-        G = nx.relabel_nodes(G, mapping)
-
-        degrees4 = [(n, d) for n, d in nx.degree(G) if not "R" in n and d > 1]
-        if degrees4:
-            raise ValueError(f"router is end device L 307 {degrees4}")
-
-
-        mapping = {n: sub(r'(HV)(\d+)-(MV)(\d+)\.(\d+)-Trafo\s*(\d*)', r'\1\3_Trafo_\2\5', n)
-                   for n in G.nodes
-                   if "Trafo" in n and "HV" in n
-                   }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {n: sub(r'MV(\d+)\.(\d+) MV\s*Load\s*(\d+)', r'MV_Load_\1\2\3_1', n)
-                   for n in G.nodes
-                   if "Load" in n and "MV" in n
-                   }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {n: sub(r'MV(\d+)\.(\d+) \s*Load\s*(\d+)', r'MV_Load_\1\2\3', n)
-                   for n in G.nodes
-                   if "Load" in n and "MV" in n
-                   }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {n: sub(r'LV(\d+)\.(\d+)\s*Load\s*(\d+)', r'LV_Load_\1\2\3', n)
-                   for n in G.nodes
-                   if "Load" in n and "LV" in n
-                   }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {n: sub(r'MV(\d+)\.(\d+) (MV)*\s*SGen\s*(\d+)', r'MV_PV_\1\2\4_\3', n)
-                   for n in G.nodes
-                   if "SGen" in n and "MV" in n
-                   }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {n: sub(r'MV\d+\.\d+ loop_line_switch (\d)\.(\d)', r'switch_\1\2', n)
-                   for n in G.nodes
-                   if 'switch' in n
-                   }
-        G = nx.relabel_nodes(G, mapping)
-
-        mapping = {n: sub(r'HV(\d+)_MV(\d*).(\d+)_load', r'MV_Load_\1\2\3_2', n)
-                   for n in G.nodes
-                   if 'load' in n and "HV" in n and "MV" in n
-                   }
-
-        G = nx.relabel_nodes(G, mapping)
-
-    accepted_keys = ['HVMV_Trafo', 'MVLV_trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
-                     'WKA','LV_PV', 'S']
+    accepted_keys = ['HVMV_Trafo', 'MVLV_Trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
+                     'WKA','LV_PV', 'S', 'Bus', 'MV_BM', 'MV_Hydro', 'MV_WP']
     accepted = []
     for k in G.nodes:
         for ak in accepted_keys:
@@ -265,9 +169,10 @@ def _rename_components(G):
     if len(accepted) < len(list(G.nodes)):
         dif = set(list(G.nodes)) - set(accepted)
         raise KeyError(f"missed components to consider renaming by {dif} ")
+    nx.draw(G, with_labels=True)
+    plt.show()
+    #return G
 
-
-    return G
 
 
 def repairing_graph(MG):
@@ -280,17 +185,16 @@ def repairing_graph(MG):
     # except:
     #     logger.info("fix graph")
     #     G = _fix_graph_for_all_cycles(MG)
-    if not nx.is_connected(G):
-        raise nx.NetworkXError("Graph is not connected after fixing")
-    G.remove_nodes_from(['S1', 'S2', 'S3'])  # these are not servers, but names for switches
-    logger.info("remove middle components")
-    G = _remove_middle_compoents(G)
-    if not nx.is_connected(G):
-        raise nx.NetworkXError("Graph is not connected after removing middle components")
-    #degrees2 = [(n, d) for n, d in nx.degree(G) if d > 1]
+    # if not nx.is_connected(G):
+    #     raise nx.NetworkXError("Graph is not connected after fixing")
+    # G.remove_nodes_from(['S1', 'S2', 'S3'])  # these are not servers, but names for switches
+    # logger.info("remove middle components")
     G = _rename_components(G)
     if not nx.is_connected(G):
         raise nx.NetworkXError("Graph is not connected after renaming components")
+    G = _remove_middle_compoents(G)
+    if not nx.is_connected(G):
+        raise nx.NetworkXError("Graph is not connected after removing middle components")
     degrees3 = [(n, d) for n, d in nx.degree(G) if not "R" in n and d > 1]
     if degrees3:
         raise ValueError(f"OT device pretending to be a router {degrees3}")
@@ -325,88 +229,108 @@ def determine_smallest_grid():
     #Kleinstes MV+LV-Netz: 1-MVLV-rural-1.108-0-no_sw
     #Anzahl Busse: 109
 
-def voltage_level(vn_kv: float) -> str:
-    if vn_kv < 1.0:
-        return "LV"          # Niederspannung
-    elif vn_kv < 60.0:
-        return "MV"          # Mittelspannung
+
+
+def create_node(G, asset, type):
+    bus = asset["bus"]
+    name = str(asset.get("name", ""))
+    vl = "LV" if "LV" in name else ("MV" if "MV" in name else "HV")
+    subnet = asset["subnet"][2:]
+    if "profile" in asset:
+        if "lv_rural" in asset["profile"] or "lv_semiurb" in asset["profile"] or "lv_urban" in asset["profile"]:
+            return G
+        if type != "load":
+            asset_name = f"{vl}_{asset["profile"]}_{subnet}"
+        else:
+            asset_name = f"{vl}_Load_{asset["profile"]}_{subnet}"
     else:
-        return "HV"          # Hochspannung
+        if "switch" in name:
+            asset_name = sub(r'MV\d+\.\d+ loop_line_switch (\d)\.(\d)', r'switch_\1\2', name)
+        else:
+            raise ValueError("no rule for this asset")
+    pos = G.nodes[bus]['pos']
+    if "p_mw" in asset:
+        p_mv = asset["p_mw"]
+        G.add_node(asset_name, pos=pos, p_mv=p_mv, type=type)
+    else:
+        G.add_node(asset_name, pos=pos, type=type)
+    G.add_edge(bus, asset_name)
+    return G
 
-
-def power(G, net):
-    def sum_pq_by_bus(df: pd.DataFrame, bus_col="bus", p_col="p_mw", q_col="q_mvar"):
-        if df is None or len(df) == 0 or bus_col not in df.columns:
-            return pd.Series(dtype=float), pd.Series(dtype=float)
-
-        d = df.copy()
-        if "in_service" in d.columns:
-            d = d[d["in_service"].astype(bool)]
-
-        p = d.groupby(bus_col)[p_col].sum() if p_col in d.columns else pd.Series(dtype=float)
-        q = d.groupby(bus_col)[q_col].sum() if q_col in d.columns else pd.Series(dtype=float)
-        return p, q
-
-    p_load, q_load = sum_pq_by_bus(net.load)
-    p_sgen, q_sgen = sum_pq_by_bus(net.sgen)
-    p_gen, q_gen = sum_pq_by_bus(net.gen)
-    p_sto, q_sto = sum_pq_by_bus(getattr(net, "storage", pd.DataFrame()))
-
-    attrs = {}
-    for b in G.nodes:
-        pl = float(p_load.get(b, 0.0));
-        ql = float(q_load.get(b, 0.0))
-        pg = float(p_gen.get(b, 0.0));
-        qg = float(q_gen.get(b, 0.0))
-        ps = float(p_sgen.get(b, 0.0));
-        qs = float(q_sgen.get(b, 0.0))
-        pst = float(p_sto.get(b, 0.0));
-        qst = float(q_sto.get(b, 0.0))
-
-        # Netto-Injektion: Erzeugung minus Last (Storage hier als "Erzeuger" mit Vorzeichen aus Tabelle)
-        p_net = (pg + ps + pst) - pl
-        q_net = (qg + qs + qst) - ql
-
-        attrs[b] = {
-            "p_load_mw": pl, "q_load_mvar": ql,
-            "p_gen_mw": pg, "q_gen_mvar": qg,
-            "p_sgen_mw": ps, "q_sgen_mvar": qs,
-            "p_net_mw": p_net, "q_net_mvar": q_net,
-        }
-
-    nx.set_node_attributes(G, attrs)
+def delete_node(G, node):
+    nbrs = list(G.neighbors(node[0]))
+    if len(nbrs) > 1:
+        G.add_edge(nbrs[0], nbrs[1])
+        G.remove_node(node)
     return G
 
 
 def determine_type(G, net):
     bus_ids = list(G.nodes)
-    bus_df = net.bus.loc[bus_ids, ["name", "vn_kv", "zone"]]
+    #bus_df = net.bus.loc[bus_ids, ["name", "vn_kv", "zone"]]
     # print(bus_df.head())
     mapping = {i: f"{net.bus.at[i, 'name']} ({i})" for i in net.bus.index}
-    types = {bus: "bus" for bus in G.nodes}
+    for ix, bus in net.bus.iterrows():
+        name = bus['name']
+        G.nodes[ix]['b_id'] = ix
+        G.nodes[ix]['type'] = "bus"
+        vl = ""
+        if "LV" in name:
+            vl = "LV"
+        elif "MV" in name:
+            vl = "MV"
+        elif "HV" in name:
+            vl = "HV"
+        else:
+            raise ValueError("no voltage level rule for this asset")
+        G.nodes[ix]["voltage_level  "] = vl
+        new_name = f"Bus_{ix}"
+        mapping[ix] = new_name
 
-    for bus in net.ext_grid["bus"].tolist():
-        types[bus] = "slack"
 
-    for bus in net.gen["bus"].tolist():
-        types[bus] = "gen"
+    # for asset in net.ext_grid:
+    #     bus = asset["bus"]
+    #     vl = "LV" if "LV" in asset['name'] else "HV"
+    #     sgen_name = f"{vl}_{asset["profile"]}"
+    #     pos = G.nodes[bus]['pos']
+    #     p_mv = asset["p_mw"]
+    #     G.add_node(sgen_name, pos=pos, p_mv=p_mv)
+    #     G.add_edge(bus, asset)
 
-    for bus in net.sgen["bus"].tolist():
-        types[bus] = "sgen"
-    for bus in net.storage["bus"].tolist():
-        types[bus] = "storage"
-    for bus in net.load["bus"].tolist():
-        types[bus] = "load" if types.get(bus) == "bus" else types[bus] + "+load"
+    accepted_keys = ['HVMV_Trafo', 'MVLV_Trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
+                     'WKA','LV_PV', 'S']
 
-    level = {bus: voltage_level(net.bus.at[bus, "vn_kv"]) for bus in G.nodes}
-    nx.set_node_attributes(G, level, name="level")
-
-    nx.set_node_attributes(G, {b: (b in set(net.trafo["hv_bus"])) for b in G.nodes}, name="hv_trafo")
-    nx.set_node_attributes(G, {b: (b in set(net.trafo["lv_bus"])) for b in G.nodes}, name="lv_trafo")
-    nx.set_node_attributes(G, types, name="type")
-    # nx.set_node_attributes(G, net.bus["type"].to_dict(), name="type")
+    for asset in net.gen.iterrows():
+        G = create_node(G, asset, "gen")
+    for ix, sgen in net.sgen.iterrows():
+        G = create_node(G, sgen, "sgen")
+    for ix, asset in net.storage.iterrows():
+        G = create_node(G, asset, "storage")
+    for ix, asset in net.switch.iterrows():
+        G = create_node(G, asset, "switch")
+    for ix, asset in net.load.iterrows():
+        G = create_node(G, asset, "load")
+    for ix, trafo in net.trafo.iterrows():
+        ctr = 1
+        lvbus = trafo["lv_bus"]
+        hvbus = trafo["hv_bus"]
+        name = str(trafo.get("name", ""))
+        if "EHV" in name:
+            raise ValueError("no concept for EHV")
+        if "LV" in name:
+            asset_name = "MVLV"
+        else:
+            asset_name = "HVMV"
+        subnet = trafo["subnet"][2:]
+        asset_name = asset_name + "_Trafo_" + subnet
+        if asset_name in G.nodes():
+            asset_name = asset_name + str(ctr)
+            ctr += 1
+        pos = G.nodes[hvbus]['pos']
+        G.add_node(asset_name, pos=pos, type="trafo")
+        G.add_edge(lvbus, asset_name)
+        #G.add_edge(hvbus, asset_name)
     MG = nx.relabel_nodes(G, mapping, copy=True)
-
     return MG
 
 
@@ -458,8 +382,8 @@ MG = determine_type(G, net)
 #file = "1-MVLV-rural-1.108-0-no_sw_graph.pkl"
 # with open(file, 'rb') as outfile:
 #     MG = pickle.load(outfile)
-
-G = repairing_graph(MG)
+G = PhysGraph(MG)
+G = repairing_graph(G)
 
 file2 = f"{sb_code}_fixed.pkl"
 pickle.dump(G, open(file2, "wb"))
