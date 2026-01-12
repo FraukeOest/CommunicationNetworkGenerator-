@@ -59,21 +59,46 @@ def _fix_graph_for_all_cycles(MG: nx.Graph):
         raise ValueError("fixing failed, no nodes in graph")
     return G
 
+def calculate_cycles(graph, MH):
+    print("calculate cycles")
+    H = graph.copy()
+    J = graph.copy()
+    for node, attr in J.nodes(data=True):
+        if attr['type'] == "bus":
+            if attr['b_id'] not in MH.nodes():
+                H.remove_node(node)
+    cycles = list(nx.minimum_cycle_basis(H, weight=None))
+    print(f"cycles: {len(cycles)}")
 
-
-def _remove_middle_compoents(graph: PhysGraph):
+def _remove_middle_compoents(graph: PhysGraph, MH):
     """removes parts that are connected in the power grid line that are connected differently in the communication
     network (star-like)"""
 
 
     if not list(graph.nodes):
         raise ValueError("no nodes in Graph to be remodelled")
-    # print("calculate cycles")
-    # cycles = list(nx.minimum_cycle_basis(G, weight=None))
-    # print(f"cycles: {len(cycles)}")
+    calculate_cycles(graph, MH)
     ctr = 0
+    H = graph.copy()
+    router = [n[0] for n in graph.nodes(data=True) if n[1]["type"] == "bus" and "R" in n[0]]
+    for node, attr in H.nodes(data=True):
+        if attr["type"] != "bus":
+            nbrs = list(nx.neighbors(graph, node))
+            if any("R" in n for n in nbrs):
+                for nbr in nbrs:
+                    if "R" not in nbr:
+                        graph.remove_edge(node, nbr)
+            else:
+                closest = {r: nx.shortest_path_length(graph, source=node, target=r) for r in router}
+                best_r = min(closest, key=closest.get)
+                for nbr in nbrs:
+                    graph.remove_edge(node, nbr)
+                graph.add_edge(best_r, node)
+    calculate_cycles(graph, MH)
+
     while True:
         finished = True
+        ctr += 1
         H = graph.copy()
         print(graph.number_of_nodes())
         for node, attr in H.nodes(data=True):
@@ -81,27 +106,44 @@ def _remove_middle_compoents(graph: PhysGraph):
                 if (attr["voltage_level"] == "LV" or attr["voltage_level"] == "MV") and "R" not in node:
                     graph, deleted = delete_node(graph, node, 2)
                     finished = not deleted
-                    print("try to delete switch node", node)
+                    # print("try to delete switch node", node)
+                    #calculate_cycles(graph, MH)
                     if deleted:
                         continue
                     #print("delete base on degree 2")
                 if H.degree[node] <= 1:
-                    print("try to delete single node", node)
-                    if graph.has_node(node):
-                        graph.remove_node(node)
-                        finished = False
-                        continue
-                if "R" not in node:
-                    print("try to delete node", node)
-                    if graph.has_node(node):
-                        graph, deleted = delete_node(graph, node, 1000)
-                        finished = False
-        ctr +=1
+                    graph.remove_node(node)
+                    finished = False
+                    continue
+                # if "R" not in node:
+                #     print("try to delete node", node)
+                #     if graph.has_node(node):
+                #         graph, deleted = delete_node(graph, node, 3)
+                #         calculate_cycles(graph, MH)
+                #         finished = False
+        ctr += 1
         print("counter: ", ctr)
         if finished:
             break
-    cycles = list(nx.minimum_cycle_basis(G, weight=None))
-    print(f"cycles: {len(cycles)}")
+
+    # for node, attr in graph.nodes(data=True):
+    #     if attr["type"] == "bus":
+    #         nbrs = list(nx.neighbors(graph, node))
+    #         if len(nbrs) > 3:
+    #             print(f"node {node} with neigbhors {nbrs}")
+    # calculate_cycles(graph, MH)
+
+    keep = [n for n, a in graph.nodes(data=True) if a.get("type") == "bus"]
+    H = graph.copy()
+    J = H.copy()
+    for node in J.nodes():
+        if node not in keep:
+            H.remove_node(node)
+    cycles = list(nx.minimum_cycle_basis(H, weight=None))
+    print(f"cycles graph: {len(cycles)}")
+    nx.draw(H, with_labels=True)
+    plt.show()
+
     # busses = [n for n in graph.nodes if "Bus" in n]
     # for n in busses:
     #     neighbor = list(graph.neighbors(n))
@@ -114,10 +156,10 @@ def _remove_middle_compoents(graph: PhysGraph):
         graph.remove_nodes_from(degrees4)
         degrees4 = [n for n, d in graph.degree() if "Bus" in str(n) and d <= 1]
 
-    router = [n for n in graph.nodes(data=True) if n[1]["type"] == "bus" and "R" in n[0]]
+
     pos = nx.get_node_attributes(graph, 'pos')
     isolates = list(nx.isolates(graph))
-    coords_router = np.array([pos[n] for n, att in router])
+    coords_router = np.array([pos[n] for n in router])
     kdtree = cKDTree(coords_router)
     coords_iso = np.array([pos[n] for n in isolates])
     if len(coords_iso) > 1:
@@ -125,8 +167,7 @@ def _remove_middle_compoents(graph: PhysGraph):
         for iso_node, connected_index in zip(isolates, idxs):
             target = router[connected_index]
             graph.add_edge(iso_node, target, weight=10, lat=20)
-    # nx.draw(graph, with_labels=True)
-    # plt.show()
+
     degrees = [(n, d) for n, d in nx.degree(graph) if not "R" in n and d > 1]
     logger.info("finished fixing")
     if degrees:
@@ -160,7 +201,7 @@ def _rename_components(G):
 
 
 
-def repairing_graph(MG):
+def repairing_graph(MG, MH):
     G = PhysGraph(MG)
     components = list(nx.connected_components(G))  # Liste von Sets mit Knoten
     # try:
@@ -177,7 +218,7 @@ def repairing_graph(MG):
     G = _rename_components(G)
     if not nx.is_connected(G):
         raise nx.NetworkXError("Graph is not connected after renaming components")
-    G = _remove_middle_compoents(G)
+    G = _remove_middle_compoents(G, MH)
     if not nx.is_connected(G):
         raise nx.NetworkXError("Graph is not connected after removing middle components")
     degrees3 = [(n, d) for n, d in nx.degree(G) if not "R" in n and d > 1]
@@ -252,7 +293,7 @@ def delete_node(G, node, degree):
         print("Attribute Error ")
     deleted = False
     if degree >= len(nbrs) > 1:
-        print("delete node", node)
+        #print("delete node ", node, "with degree ", len(nbrs))
         deleted = True
         for ix in range(1, len(nbrs)):
             G.add_edge(nbrs[0], nbrs[ix])
@@ -360,25 +401,34 @@ def determine_pos(G, net):
     # nx.set_node_attributes(G, {b: p[1] for b, p in pos.items()}, name="y")
     return G
 
-sb_code = "1-MVLV-rural-all-2-no_sw"   # Beispiel 1-MVLV-urban-all-0-sw
+#determine_smallest_grid()
+sb_code ="1-MVLV-rural-all-2-no_sw" #"1-MVLV-rural-1.108-2-no_sw" #   # Beispiel 1-MVLV-urban-all-0-sw
 net = sb.get_simbench_net(sb_code)
 
 G = top.create_nxgraph(
     net,
-    respect_switches=True,   # offene Schalter trennen Kanten
-    include_lines=True,
-    include_trafos=True
+    multi=True, include_switches=True, respect_switches=False
 )
+netH = sb.get_simbench_net('1-MV-rural--2-no_sw')
+MH = top.create_nxgraph(
+    netH,
+    multi=True, include_switches=True, respect_switches=False
+)
+# H = nx.Graph(G)
+# cycles = list(nx.minimum_cycle_basis(H, weight=None))
+# print(f"first cycles: {len(cycles)}")
+
 if not nx.is_connected(G):
     raise nx.NetworkXError("Graph is not connected after fixing")
 G = determine_pos(G, net)
+
 MG = determine_type(G, net)
 #nx.set_node_attributes(G, net.bus["type"].to_dict(), name="type")
 #file = "1-MVLV-rural-1.108-0-no_sw_graph.pkl"
 # with open(file, 'rb') as outfile:
 #     MG = pickle.load(outfile)
 G = PhysGraph(MG)
-G = repairing_graph(G)
+G = repairing_graph(G, MH)
 
 file2 = f"{sb_code}_fixed.pkl"
 pickle.dump(G, open(file2, "wb"))
