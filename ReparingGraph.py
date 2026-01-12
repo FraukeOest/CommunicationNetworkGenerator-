@@ -68,8 +68,9 @@ def _remove_middle_compoents(graph: PhysGraph):
 
     if not list(graph.nodes):
         raise ValueError("no nodes in Graph to be remodelled")
-    cycles = list(nx.minimum_cycle_basis(G, weight=None))
-    print(f"cycles: {len(cycles)}")
+    # print("calculate cycles")
+    # cycles = list(nx.minimum_cycle_basis(G, weight=None))
+    # print(f"cycles: {len(cycles)}")
     ctr = 0
     while True:
         finished = True
@@ -77,12 +78,24 @@ def _remove_middle_compoents(graph: PhysGraph):
         print(graph.number_of_nodes())
         for node, attr in H.nodes(data=True):
             if attr["type"] == "bus":
-                if attr["voltage_level"] == "LV" or attr["voltage_level"] == "MV":
-                    graph = delete_node(graph, node)
-                    continue
-                if graph.degree[node] <= 1:
-                    graph.remove_node(node)
-                    finished = False
+                if (attr["voltage_level"] == "LV" or attr["voltage_level"] == "MV") and "R" not in node:
+                    graph, deleted = delete_node(graph, node, 2)
+                    finished = not deleted
+                    print("try to delete switch node", node)
+                    if deleted:
+                        continue
+                    #print("delete base on degree 2")
+                if H.degree[node] <= 1:
+                    print("try to delete single node", node)
+                    if graph.has_node(node):
+                        graph.remove_node(node)
+                        finished = False
+                        continue
+                if "R" not in node:
+                    print("try to delete node", node)
+                    if graph.has_node(node):
+                        graph, deleted = delete_node(graph, node, 1000)
+                        finished = False
         ctr +=1
         print("counter: ", ctr)
         if finished:
@@ -101,10 +114,10 @@ def _remove_middle_compoents(graph: PhysGraph):
         graph.remove_nodes_from(degrees4)
         degrees4 = [n for n, d in graph.degree() if "Bus" in str(n) and d <= 1]
 
-    router = [n for n in graph.nodes(data=True) if n[1]["type"]=="bus"]
+    router = [n for n in graph.nodes(data=True) if n[1]["type"] == "bus" and "R" in n[0]]
     pos = nx.get_node_attributes(graph, 'pos')
     isolates = list(nx.isolates(graph))
-    coords_router = np.array([pos[n] for n in router])
+    coords_router = np.array([pos[n] for n, att in router])
     kdtree = cKDTree(coords_router)
     coords_iso = np.array([pos[n] for n in isolates])
     if len(coords_iso) > 1:
@@ -112,9 +125,9 @@ def _remove_middle_compoents(graph: PhysGraph):
         for iso_node, connected_index in zip(isolates, idxs):
             target = router[connected_index]
             graph.add_edge(iso_node, target, weight=10, lat=20)
-    nx.draw(graph, with_labels=True)
-    plt.show()
-    degrees = [(n, d) for n, d in nx.degree(graph) if not "Bus" in n and d > 1]
+    # nx.draw(graph, with_labels=True)
+    # plt.show()
+    degrees = [(n, d) for n, d in nx.degree(graph) if not "R" in n and d > 1]
     logger.info("finished fixing")
     if degrees:
         logger.error(f"didnt delete all irrevant nodes that could act as router (but aren't): {degrees}")
@@ -132,7 +145,7 @@ def _rename_components(G):
                 nx.relabel_nodes(G, {nbrs[0]: new_name}, copy=False)
 
 
-    accepted_keys = ['HVMV_Trafo', 'MVLV_Trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
+    accepted_keys = ['HVMV_Trafo', 'MVLV_Trafo', 'switch', 'MV_Bat', 'LV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
                      'WKA','LV_PV', 'S', 'Bus', 'MV_BM', 'MV_Hydro', 'MV_WP']
     accepted = []
     for k in G.nodes:
@@ -211,13 +224,15 @@ def create_node(G, asset, type):
     if "profile" in asset:
         if "lv_rural" in asset["profile"] or "lv_semiurb" in asset["profile"] or "lv_urban" in asset["profile"]:
             return G
-        if type != "load":
+        if type == "storage":
+            asset_name = f"{vl}_Bat_{asset["profile"]}_{subnet}"
+        elif type != "load":
             asset_name = f"{vl}_{asset["profile"]}_{subnet}"
         else:
             asset_name = f"{vl}_Load_{asset["profile"]}_{subnet}"
     else:
-        if "switch" in name:
-            asset_name = sub(r'MV\d+\.\d+ loop_line_switch (\d)\.(\d)', r'switch_\1\2', name)
+        if "switch" in name or "Switch" in name:
+            asset_name = sub(r'MV\d+\.\d+ loop_line_switch (\d+)\.(\d+)', r'switch_\1\2', name)
         else:
             raise ValueError("no rule for this asset")
     pos = G.nodes[bus]['pos']
@@ -230,12 +245,19 @@ def create_node(G, asset, type):
     G.add_edge(bus, asset_name)
     return G
 
-def delete_node(G, node):
-    nbrs = list(G.neighbors(node))
-    if len(nbrs) == 2:
-        G.add_edge(nbrs[0], nbrs[1])
+def delete_node(G, node, degree):
+    try:
+        nbrs = list(G.neighbors(node))
+    except AttributeError:
+        print("Attribute Error ")
+    deleted = False
+    if degree >= len(nbrs) > 1:
+        print("delete node", node)
+        deleted = True
+        for ix in range(1, len(nbrs)):
+            G.add_edge(nbrs[0], nbrs[ix])
         G.remove_node(node)
-    return G
+    return G, deleted
 
 
 def determine_type(G, net):
@@ -338,7 +360,7 @@ def determine_pos(G, net):
     # nx.set_node_attributes(G, {b: p[1] for b, p in pos.items()}, name="y")
     return G
 
-sb_code = "1-MVLV-rural-1.108-0-no_sw"   # Beispiel 1-MVLV-urban-all-0-sw
+sb_code = "1-MVLV-rural-all-2-no_sw"   # Beispiel 1-MVLV-urban-all-0-sw
 net = sb.get_simbench_net(sb_code)
 
 G = top.create_nxgraph(
