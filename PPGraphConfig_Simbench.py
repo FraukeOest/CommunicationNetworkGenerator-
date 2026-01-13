@@ -362,45 +362,6 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
     return G
 
 
-def positions(mv_net):
-    pos = {}
-    # 1) Falls bus_geodata existiert (bei dir offenbar nicht)
-    if hasattr(mv_net, "bus_geodata"):
-        if len(mv_net.bus_geodata.index) > 0 and {"x", "y"}.issubset(mv_net.bus_geodata.columns):
-            pos = {b: (mv_net.bus_geodata.at[b, "x"], mv_net.bus_geodata.at[b, "y"])
-                   for b in mv_net.bus_geodata.index if b in MG}
-
-    # 2) Manche Netze haben x/y direkt in net.bus
-    if not pos and {"x", "y"}.issubset(getattr(mv_net, "bus", []).columns):
-        pos = {b: (mv_net.bus.at[b, "x"], mv_net.bus.at[b, "y"])
-               for b in mv_net.bus.index if b in MG}
-
-    # 3) Oder GeoJSON-artig in net.bus["geo"]
-    if not pos and "geo" in mv_net.bus.columns:
-        for b in mv_net.bus.index:
-            if b not in MG:
-                continue
-            g = mv_net.bus.at[b, "geo"]
-            if g is None:
-                continue
-            # oft als String im GeoJSON-Format
-            if isinstance(g, str):
-                try:
-                    d = json.loads(g)
-                    x, y = d["coordinates"]
-                    pos[b] = (x, y)
-                except Exception:
-                    pass
-
-    # 4) Fallback: schnelles Layout (NICHT spring_layout)
-    if not pos:
-        print("Keine Geodaten gefunden -> random_layout als Fallback.")
-        t0 = time.perf_counter()
-        pos = nx.random_layout(MG, seed=1)
-        print("Layout seconds:", time.perf_counter() - t0)
-    return pos
-
-
 if __name__ == '__main__':
     #
     #codes = sb.collect_all_simbench_codes()
@@ -412,11 +373,11 @@ if __name__ == '__main__':
     # # #grid0 = '1-LV-rural1--1-no_sw'
 
     print("load graph")
-    file = "1-MVLV-rural-all-0-no_sw_graph.pkl"
-    # with open(file, 'rb') as outfile:
-    #     MG = pickle.load(outfile)
-    # print("create phys graph")
-    # G = Cigre_Sampled(MG=MG, router_reduced=1)
+    file = "1-MVLV-rural-all-2-no_sw_fixed.pkl"
+    with open(file, 'rb') as outfile:
+        MG = pickle.load(outfile)
+    print("create phys graph")
+    G = Cigre_Sampled(MG=MG, router_reduced=1)
     #G.plot(legend=True)
 
 
