@@ -121,37 +121,39 @@ def _remove_middle_compoents(graph: PhysGraph, MH):
             break
     l_connected_buses = dict()
     H = graph.copy()
-    for node, attr in H.nodes(data=True):
-        if attr["type"] == "bus" and not "R" in node:
-            nbrs = list(nx.neighbors(graph, node))
-            if len(nbrs) == 3:
-                sub = "R"
-                l_connected_buses[node] = {'degree': len(nbrs),
-                                           'neighbors': nbrs}
-                idx = next((i for i, s in enumerate(nbrs) if sub in s), -1)
-                r1 = nbrs.pop(idx)
-                idx = next((i for i, s in enumerate(nbrs) if sub in s), -1)
-                r2 = nbrs[idx]
-                if r1 != r2:
-                    graph.add_edge(r1, r2)
-                    graph.remove_edge(node, r1)
-                    graph.remove_edge(node, r2)
-                    break
-            print(f"node: {node} nbrs: {nbrs}")
+    # for node, attr in H.nodes(data=True):
+    #     if attr["type"] == "bus" and not "R" in node:
+    #         nbrs = list(nx.neighbors(graph, node))
+    #         if len(nbrs) == 3:
+    #             sub = "R"
+    #             l_connected_buses[node] = {'degree': len(nbrs),
+    #                                        'neighbors': nbrs}
+    #             idx = next((i for i, s in enumerate(nbrs) if sub in s), -1)
+    #             r1 = nbrs.pop(idx)
+    #             idx = next((i for i, s in enumerate(nbrs) if sub in s), -1)
+    #             r2 = nbrs[idx]
+    #             if r1 != r2:
+    #                 graph.add_edge(r1, r2)
+    #                 graph.remove_edge(node, r1)
+    #                 graph.remove_edge(node, r2)
+    #                 break
+    #         print(f"node: {node} nbrs: {nbrs}")
     H = graph.copy()
     # for node, attr in H.nodes(data=True):
     #     if attr["type"] == "bus" and not "R" in node:
     #         if H.degree[node] <= 1:
     #             graph.remove_node(node)
-    isolates = list(nx.isolates(graph))
-    graph.remove_nodes_from(isolates)
-    calculate_cycles(graph, MH)
     for r in router:
         neigbors = list(nx.neighbors(graph, r))
         for n in neigbors:
             if graph.nodes[n]['type'] == "bus" and "R" not in n:
                 graph = nx.contracted_nodes(graph, r, n, self_loops=False, copy=True)
     keep = [n for n, a in graph.nodes(data=True) if a.get("type") == "bus"]
+
+    isolates = list(nx.isolates(graph))
+    graph.remove_nodes_from(isolates)
+    calculate_cycles(graph, MH)
+
     H = graph.copy()
     J = H.copy()
     for node in J.nodes():
