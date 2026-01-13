@@ -81,6 +81,9 @@ def _remove_middle_compoents(graph: PhysGraph, MH):
     ctr = 0
     H = graph.copy()
     router = [n[0] for n in graph.nodes(data=True) if n[1]["type"] == "bus" and "R" in n[0]]
+    ot = [n[0] for n in graph.nodes(data=True) if n[1]["type"] != "bus"]
+    graph.ot_devices = ot
+    graph.routers = router
     for node, attr in H.nodes(data=True):
         if attr["type"] != "bus":
             nbrs = list(nx.neighbors(graph, node))
@@ -120,7 +123,6 @@ def _remove_middle_compoents(graph: PhysGraph, MH):
         if finished:
             break
     l_connected_buses = dict()
-    H = graph.copy()
     # for node, attr in H.nodes(data=True):
     #     if attr["type"] == "bus" and not "R" in node:
     #         nbrs = list(nx.neighbors(graph, node))
@@ -148,26 +150,26 @@ def _remove_middle_compoents(graph: PhysGraph, MH):
         for n in neigbors:
             if graph.nodes[n]['type'] == "bus" and "R" not in n:
                 graph = nx.contracted_nodes(graph, r, n, self_loops=False, copy=True)
-    keep = [n for n, a in graph.nodes(data=True) if a.get("type") == "bus"]
+
 
     isolates = list(nx.isolates(graph))
     graph.remove_nodes_from(isolates)
     calculate_cycles(graph, MH)
-
+    keep = [n for n, a in graph.nodes(data=True) if a.get("type") == "bus"]
     H = graph.copy()
     J = H.copy()
     for node in J.nodes():
         if node not in keep:
             H.remove_node(node)
-    cycles = list(nx.minimum_cycle_basis(H, weight=None))
-    for i, c in enumerate(cycles):
-        print(f"------ cycle ----- {i}\n")
-        print(c)
-    keep = cycles[4]
-    H = nx.subgraph(H, keep)
-    print(f"cycles graph: {len(cycles)}")
-    nx.draw(H, with_labels=True)
-    plt.show()
+    # cycles = list(nx.minimum_cycle_basis(H, weight=None))
+    # for i, c in enumerate(cycles):
+    #     print(f"------ cycle ----- {i}\n")
+    #     print(c)
+    # keep = cycles[4]
+    # H = nx.subgraph(H, keep)
+    # print(f"cycles graph: {len(cycles)}")
+    # nx.draw(graph)
+    # plt.show()
 
     # busses = [n for n in graph.nodes if "Bus" in n]
     # for n in busses:
@@ -198,6 +200,8 @@ def _remove_middle_compoents(graph: PhysGraph, MH):
     if degrees:
         logger.error(f"didnt delete all irrevant nodes that could act as router (but aren't): {degrees}")
         raise ValueError("didnt delete all irrevant nodes that could act as router (but aren't)")
+    graph.ot_devices = ot
+    graph.routers = router
     return graph
 
 
@@ -207,8 +211,12 @@ def _rename_components(G):
     for node in H.nodes(data=True):
             if node[1]["type"] == "trafo":
                 nbrs = list(G.neighbors(node[0]))
+                if any('R' in n for n in nbrs):
+                    print(nbrs)
                 new_name = f"R_{G.nodes[nbrs[0]]['b_id']}"
                 nx.relabel_nodes(G, {nbrs[0]: new_name}, copy=False)
+                if new_name == "R_2":
+                    print(node[0])
 
 
     accepted_keys = ['HVMV_Trafo', 'MVLV_Trafo', 'switch', 'MV_Bat', 'LV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV', 'LV_Load',
@@ -379,16 +387,16 @@ def determine_type(G, net):
         if "EHV" in name:
             raise ValueError("no concept for EHV")
         if "LV" in name:
-            asset_name = "MVLV"
+            asset_type = "MVLV"
         else:
-            asset_name = "HVMV"
+            asset_type = "HVMV"
         subnet = trafo["subnet"][2:]
-        asset_name = asset_name + "_Trafo_" + subnet
+        asset_name = asset_type + "_Trafo_" + subnet
         if asset_name in G.nodes():
             asset_name = asset_name + str(ctr)
             ctr += 1
         pos = G.nodes[hvbus]['pos']
-        G.add_node(asset_name, pos=pos, type="trafo")
+        G.add_node(asset_name, pos=pos, type="trafo", model=asset_type)
         G.add_edge(lvbus, asset_name)
         #G.add_edge(hvbus, asset_name)
     MG = nx.relabel_nodes(G, mapping, copy=True)
