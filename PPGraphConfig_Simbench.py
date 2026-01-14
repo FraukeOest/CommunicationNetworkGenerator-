@@ -234,7 +234,7 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
         print(f"{graph_name} already.")
     else:
         BASE_DIR = Path(__file__).resolve().parent
-        pkl_path = BASE_DIR / "1-MVLV-rural-all-2-no_sw_fixed.pkl"
+        pkl_path = BASE_DIR / "1-MVLV-rural-all-0-no_sw_fixed.pkl"
         with open(pkl_path,'rb') as outfile:
                 MG = pickle.load(outfile)
         graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,

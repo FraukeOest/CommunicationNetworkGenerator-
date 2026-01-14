@@ -161,7 +161,8 @@ def _remove_middle_compoents(graph: PhysGraph, MH):
     for node in J.nodes():
         if node not in keep:
             H.remove_node(node)
-    # cycles = list(nx.minimum_cycle_basis(H, weight=None))
+    cycles = list(nx.minimum_cycle_basis(H, weight=None))
+    print("calculated cycles: ", len(cycles))
     # for i, c in enumerate(cycles):
     #     print(f"------ cycle ----- {i}\n")
     #     print(c)
@@ -268,21 +269,22 @@ def determine_smallest_grid():
     codes = sb.collect_all_simbench_codes(
         hv_level="MV",
         lv_level="LV",
-        scenario=0,          # Szenario fixieren (Bus-Anzahl bleibt i.d.R. gleich)
+        scenario=2,          # Szenario fixieren (Bus-Anzahl bleibt i.d.R. gleich)
         breaker_rep=None,    # beide Varianten zulassen (sw / no_sw)
         all_data=True
     )
-
-    best = None  # (n_buses, code)
-
+    sizes = []
     for code in codes:
         net = sb.get_simbench_net(code)
-        n_buses = len(net.bus)
-        if best is None or n_buses < best[0]:
-            best = (n_buses, code)
+        sizes.append((len(net.bus), code))
 
-    print("Kleinstes MV+LV-Netz:", best[1])
-    print("Anzahl Busse:", best[0])
+    sizes.sort()  # sortiert standardmäßig nach dem 1. Element im Tupel, dann nach dem 2.
+
+    for n_buses, code in sizes:
+        print(f"{n_buses:6d}  {code}")
+
+    print("\nKleinstes MV+LV-Netz:", sizes[0][1])
+    print("Anzahl Busse:", sizes[0][0])
 
 
     #Kleinstes MV+LV-Netz: 1-MVLV-rural-1.108-0-no_sw
@@ -435,14 +437,15 @@ def determine_pos(G, net):
     return G
 
 #determine_smallest_grid()
-sb_code ="1-MVLV-rural-all-2-no_sw" #"1-MVLV-rural-1.108-2-no_sw" #   # Beispiel 1-MVLV-urban-all-0-sw
+sb_code ="1-MVLV-rural-all-0-no_sw" #"1-MVLV-rural-1.108-2-no_sw" #   # Beispiel 1-MVLV-urban-all-0-sw    1-MVLV-rural-4.101-2-no_sw
+
 net = sb.get_simbench_net(sb_code)
 
 G = top.create_nxgraph(
     net,
     multi=True, include_switches=True, respect_switches=False
 )
-netH = sb.get_simbench_net('1-MV-rural--2-no_sw')
+netH = sb.get_simbench_net('1-MV-rural--0-no_sw')
 MH = top.create_nxgraph(
     netH,
     multi=True, include_switches=True, respect_switches=False
