@@ -79,7 +79,7 @@ def determine_crossconnection(G, nodes_list, r_n, a, b, c):
             if j > 1 and (i, k) not in dict_hops:
                 dict_hops[(k, i)] = j
     sorted_d_hops = dict(sorted(dict_hops.items(), key=lambda item: item[1]))
-    print(sorted_d_hops)
+    logger.info(sorted_d_hops)
     max_geo_local = max(sorted_d_geo_dist.values())
     norm_geo_local = {k: v / max_geo_local for k, v in sorted_d_geo_dist.items() if k in sorted_d_hops.keys()}
 
@@ -155,14 +155,6 @@ def _contract_router(G, reduced_to_factor):
         if H.has_edge(r, v):
             H = nx.contracted_edge(H, (r, v), copy=False, self_loops=False)
         H.routers = [node for node in G.routers if node in H.nodes]
-    # if 0.6 < reduced_to_factor < 0.7:
-    #     contract_every = 3
-    # if reduced_to_factor == 0.5:
-    #     contract_every = 2
-    # for i, (u, v) in enumerate(edges):
-    #     if i % contract_every == 0 and H.has_edge(u, v):
-    #         H = nx.contracted_edge(H, (u, v), copy=False, self_loops=False)
-    #         print(f"contracted {u, v}")
     H.servers = G.servers
     H.routers = [node for node in G.routers if node in H.nodes]
     H.ot_devices = G.ot_devices
@@ -230,14 +222,8 @@ def find_server_place(G):
 def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100, regenerate=False):
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
-    print("load graph")
-    file = "1-MVLV-rural-all-0-no_sw_graph_fixed.pkl"
-    # with open(file, 'rb') as outfile:
-    #     MG = pickle.load(outfile)
-    # print("create phys graph")
-    # G = Cigre_Sampled(MG=MG, router_reduced=1)
-    # G.plot(legend=True)
-    graph_name = (f"1-MVLV-rural-all-0-no_sw_graph.pkl_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
+
+    graph_name = (f"1-MVLV-rural-all-2-no_sw_fixed_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
                   f"_comp_factor={comp_factor}_br_edge={br_edge}_core={br_core}.pkl")
     cwd = Path.cwd()
     parent = cwd.parent
@@ -248,7 +234,7 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
         print(f"{graph_name} already.")
     else:
         BASE_DIR = Path(__file__).resolve().parent
-        pkl_path = BASE_DIR / "1-MVLV-rural-all-0-no_sw_graph_fixed.pkl"
+        pkl_path = BASE_DIR / "1-MVLV-rural-all-2-no_sw_fixed.pkl"
         with open(pkl_path,'rb') as outfile:
                 MG = pickle.load(outfile)
         graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
@@ -258,30 +244,6 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
             print(f"{graph_name} was not found.")
     if not nx.is_connected(graph):
         raise nx.NetworkXError("Graph is not connected")
-    return graph
-
-def predetermine_cigre_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1, w_degree=1, comp_factor=1, br_edge=10, br_core=100, regenerate=False):
-    """only generates a graph once for one parameterization combination.
-    If it already exists, it loads the pickled graph"""
-    graph_name = (f"CigreMVLV_router_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
-                  f"_comp_factor={comp_factor}_br_edge={br_edge}_core={br_core}.pkl")
-    cwd = Path.cwd()
-    parent = cwd.parent
-    graph_dir = parent / "graphs"
-    path = graph_dir / graph_name
-    if os.path.exists(path) and not regenerate:
-        graph = pickle.load(open(path, "rb"))
-        print(f"{graph_name} already.")
-    else:
-        BASE_DIR = Path(__file__).resolve().parent
-        pkl_path = BASE_DIR / "cigre_MV_LV_Graph.pkl"
-        with open(pkl_path,'rb') as outfile:
-                MG = pickle.load(outfile)
-        graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
-                                   comp_factor=comp_factor, br_edge=br_edge, br_core=br_core, MG=MG)
-        if not regenerate:
-            pickle.dump(graph, open(path, "wb"))
-            print(f"{graph_name} was not found.")
     return graph
 
 def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_degree=1,
@@ -338,9 +300,11 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
     logger.info("creating finegrained topology")
     regard_rings = True
     if router_reduced < 1:
+        logger.info("reducing routers")
         G = _contract_router(G, router_reduced)
-        # create small worlds
+    #    create small worlds
     if regard_rings:
+        logger.info("calculating rings")
         cycle_edges = list(nx.minimum_cycle_basis(G, weight=None))
         print(len(cycle_edges))
         print(cycle_edges)
@@ -350,6 +314,7 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
     G.n_areas = len(cycle_edges)
     #G = _create_small_worlds_for_areas(G, cycle_edges, sw_k, sw_p, br_core)
     for cycle in cycle_edges:
+        logger.info("calculating crossconnections")
         crossy_list = determine_crossconnection(G, nodes_list=cycle, r_n=rel_n_crosslinks, a=w_geo, b=w_hops, c=w_degree)
         G.cross_connections.extend(list(crossy_list))
         G = add_crossconnetions(G, crossy_list, br_core)
@@ -377,7 +342,7 @@ if __name__ == '__main__':
     with open(file, 'rb') as outfile:
         MG = pickle.load(outfile)
     print("create phys graph")
-    G = Cigre_Sampled(MG=MG, router_reduced=1)
+    G = Cigre_Sampled(MG=MG, router_reduced=0.7)
     #G.plot(legend=True)
 
 

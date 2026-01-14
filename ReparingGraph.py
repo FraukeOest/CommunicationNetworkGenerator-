@@ -312,8 +312,8 @@ def create_node(G, asset, type):
     pos = G.nodes[bus]['pos']
     pos = (pos[0], pos[0] + 1)
     if "p_mw" in asset:
-        p_mv = asset["p_mw"]
-        G.add_node(asset_name, pos=pos, p_mv=p_mv, type=type)
+        p_mw = asset["p_mw"]
+        G.add_node(asset_name, pos=pos, p_mw=p_mw, type=type)
     else:
         G.add_node(asset_name, pos=pos, type=type)
     G.add_edge(bus, asset_name)
