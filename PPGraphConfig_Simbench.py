@@ -223,7 +223,8 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
 
-    graph_name = (f"1-MVLV-rural-all-2-no_sw_fixed_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
+    graph_type = "1-MVLV-urban-all-2-no_sw_fixed.pkl"
+    graph_name = (f"{graph_type}_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
                   f"_comp_factor={comp_factor}_br_edge={br_edge}_core={br_core}.pkl")
     cwd = Path.cwd()
     parent = cwd.parent
@@ -234,7 +235,7 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
         print(f"{graph_name} already.")
     else:
         BASE_DIR = Path(__file__).resolve().parent
-        pkl_path = BASE_DIR / "1-MVLV-rural-all-0-no_sw_fixed.pkl"
+        pkl_path = BASE_DIR / graph_type
         with open(pkl_path,'rb') as outfile:
                 MG = pickle.load(outfile)
         graph = Cigre_Sampled(router_reduced=router_reduced, rel_n_crosslinks=r_n, w_geo=w_geo, w_hops=w_hops, w_degree=w_degree,
@@ -342,7 +343,8 @@ if __name__ == '__main__':
     with open(file, 'rb') as outfile:
         MG = pickle.load(outfile)
     print("create phys graph")
-    G = Cigre_Sampled(MG=MG, router_reduced=0.7)
+    G = Cigre_Sampled(MG=MG, router_reduced=1)
+    print(nx.diameter(G))
     #G.plot(legend=True)
 
 
