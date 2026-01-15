@@ -441,6 +441,26 @@ def Cigre_Sampled(router_reduced=1, rel_n_crosslinks=1,w_geo=1, w_hops= 1, w_deg
     #G.plot()
     return G
 
+def print_graph_components(graph):
+        accepted_keys = ['HVMV_Trafo', 'MVLV_trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV',
+                         'LV_Load',
+                         'WKA', 'LV_PV', 'S']
+        stats = {'n_lv_loads': len([ot for ot in graph.ot_devices if "LV_Load" in ot]),
+                 'n_mv_WKA': len([ot for ot in graph.ot_devices if "WKA" in ot]),
+                 'n_mv_PV': len([ot for ot in graph.ot_devices if "MV_PV" in ot]),
+                 'n_lv_PV': len([ot for ot in graph.ot_devices if "LV_PV" in ot]),
+                 'n_mv_chp': len([ot for ot in graph.ot_devices if "MV_CHP" in ot]),
+                 'n_lv_chp': len([ot for ot in graph.ot_devices if "LV_CHP_" in ot]),
+                 'n_mv_loads': len([ot for ot in graph.ot_devices if "MV_Load" in ot]),
+                 'n_mv_bat': len([ot for ot in graph.ot_devices if "MV_Bat" in ot]),
+                 'n_HVMV_Trafo': len([ot for ot in graph.ot_devices if "HVMV_Trafo" in ot]),
+                 'n_MVLV_Trafo': len([ot for ot in graph.ot_devices if "MVLV_trafo" in ot]),
+                 'n_swtich': len([ot for ot in graph.ot_devices if "switch" in ot]),
+                 'router': len([ot for ot in graph.routers]),
+                 }
+        print(stats)
+
+
 
 if __name__ == '__main__':
     grid = '1-LV-rural1--1-no_sw'
@@ -449,9 +469,11 @@ if __name__ == '__main__':
     with open("cigre_MV_LV_Graph.pkl", 'rb') as outfile:
         MG = pickle.load(outfile)
 
-    G = Cigre_Sampled(MG=MG, router_reduced=0.5)
-    unused_server = G.servers[11:]
-    G.servers = G.servers[0:11]
-    for s in unused_server:
-        G.remove_node(s.name)
-    G.plot(legend=True)
+    G = Cigre_Sampled(MG=MG, router_reduced=1)
+    print_graph_components(G)
+    # unused_server = G.servers[11:]
+    # G.servers = G.servers[0:11]
+    # for s in unused_server:
+    #     G.remove_node(s.name)
+    # G.plot(legend=True)
+
