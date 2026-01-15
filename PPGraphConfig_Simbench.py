@@ -223,7 +223,7 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
 
-    graph_type = "1-MVLV-urban-all-2-no_sw_fixed.pkl"
+    graph_type = "1-MVLV-rural-all-2-no_sw_fixed.pkl"
     graph_name = (f"{graph_type}_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
                   f"_comp_factor={comp_factor}_br_edge={br_edge}_core={br_core}.pkl")
     cwd = Path.cwd()
