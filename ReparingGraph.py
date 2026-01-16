@@ -437,7 +437,7 @@ def determine_pos(G, net):
     return G
 
 #determine_smallest_grid()
-sb_code ="1-MVLV-rural-all-2-no_sw" #"1-MVLV-rural-1.108-2-no_sw" #   # Beispiel 1-MVLV-urban-all-0-sw    1-MVLV-rural-4.101-2-no_sw
+sb_code ="1-MVLV-urban-all-2-no_sw" #"1-MVLV-rural-1.108-2-no_sw" #   # Beispiel 1-MVLV-urban-all-0-sw    1-MVLV-rural-4.101-2-no_sw
 
 net = sb.get_simbench_net(sb_code)
 
@@ -445,7 +445,7 @@ G = top.create_nxgraph(
     net,
     multi=True, include_switches=True, respect_switches=False
 )
-netH = sb.get_simbench_net('1-MV-rural--2-no_sw')
+netH = sb.get_simbench_net('1-MV-urban--2-no_sw')
 MH = top.create_nxgraph(
     netH,
     multi=True, include_switches=True, respect_switches=False

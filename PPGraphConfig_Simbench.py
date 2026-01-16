@@ -343,8 +343,27 @@ if __name__ == '__main__':
     with open(file, 'rb') as outfile:
         MG = pickle.load(outfile)
     print("create phys graph")
-    G = Cigre_Sampled(MG=MG, router_reduced=1)
-    print(nx.diameter(G))
+    graph = Cigre_Sampled(MG=MG, router_reduced=1)
+    print(f"diamater: {nx.diameter(graph)}")
+    # cycles = list(nx.minimum_cycle_basis(graph))
+    # print(f"number of cycles: {len(cycles)}"
+    print(f"nodes : {len(list(graph.nodes()))}")
+    print(f"edges : {len(list(graph.edges()))}")
+    stats = {'n_lv_loads': len([ot for ot in graph.ot_devices if "LV_Load" in ot]),
+             'n_mv_loads': len([ot for ot in graph.ot_devices if "MV_Load" in ot]),
+             'n_mv_PV': len([ot for ot in graph.ot_devices if "MV_PV" in ot]),
+             'n_lv_PV': len([ot for ot in graph.ot_devices if "LV_PV" in ot]),
+             'n_lv_bat': len([ot for ot in graph.ot_devices if "LV_bat" in ot]),
+             'n_mv_BM': len([ot for ot in graph.ot_devices if "MV_Bat" in ot]),
+             'n_mv_BM': len([ot for ot in graph.ot_devices if "MV_Bat" in ot]),
+             'n_mv_WP': len([ot for ot in graph.ot_devices if "MV_WP" in ot]),
+             'n_mv_Hydro': len([ot for ot in graph.ot_devices if "MV_Hydro" in ot]),
+             'n_HVMV_Trafo': len([ot for ot in graph.ot_devices if "HVMV_Trafo" in ot]),
+             'n_MVLV_Trafo': len([ot for ot in graph.ot_devices if "MVLV_Trafo" in ot]),
+             'n_swtich': len([ot for ot in graph.ot_devices if "switch" in ot]),
+             'router': len([ot for ot in graph.routers]),
+             }
+    print(stats)
     #G.plot(legend=True)
 
 

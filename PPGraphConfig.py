@@ -445,6 +445,9 @@ def print_graph_components(graph):
         accepted_keys = ['HVMV_Trafo', 'MVLV_trafo', 'switch', 'MV_Bat', 'MV_Load', 'LV_CHP_', 'MV_CHP', 'R', 'MV_PV',
                          'LV_Load',
                          'WKA', 'LV_PV', 'S']
+        print(f"diamater: {nx.diameter(graph)}")
+        print(f"nodes : {len(list(graph.nodes()))}")
+        print(f"edges : {len(list(graph.edges()))}")
         stats = {'n_lv_loads': len([ot for ot in graph.ot_devices if "LV_Load" in ot]),
                  'n_mv_WKA': len([ot for ot in graph.ot_devices if "WKA" in ot]),
                  'n_mv_PV': len([ot for ot in graph.ot_devices if "MV_PV" in ot]),
