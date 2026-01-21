@@ -72,22 +72,32 @@ def determine_crossconnection(G, nodes_list, r_n, a, b, c):
     #         break
 
     G_sub = G.subgraph(nodes_list).copy()
+    # hops = dict(nx.all_pairs_shortest_path_length(G_sub))
+    # dict_hops = {}
+    # for k, v in hops.items():
+    #     for i, j in v.items():
+    #         if j > 1 and (i, k) not in dict_hops:
+    #             dict_hops[(k, i)] = j
+    # sorted_d_hops = dict(sorted(dict_hops.items(), key=lambda item: item[1]))
     hops = dict(nx.all_pairs_shortest_path_length(G_sub))
     dict_hops = {}
-    for k, v in hops.items():
-        for i, j in v.items():
-            if j > 1 and (i, k) not in dict_hops:
-                dict_hops[(k, i)] = j
+    for src, dist_map in hops.items():
+        for dst, dist in dist_map.items():
+            if dist > 1:
+                key = tuple(sorted((src, dst)))  # (A,B) und (B,A) werden gleich behandelt
+                dict_hops.setdefault(key, dist)
+
     sorted_d_hops = dict(sorted(dict_hops.items(), key=lambda item: item[1]))
+
     logger.info(sorted_d_hops)
     max_geo_local = max(sorted_d_geo_dist.values())
     norm_geo_local = {k: v / max_geo_local for k, v in sorted_d_geo_dist.items() if k in sorted_d_hops.keys()}
 
-    max_hops = max(sorted_d_hops.values())
+    max_hops = max(sorted_d_hops.values(), default=0)
     norm_hops = {k: v / max_hops for k, v in sorted_d_hops.items()}
 
     edge_degree = {k: G.degree[k[0]] + G.degree[k[1]] for k in sorted_d_hops.keys()}
-    max_edge_degree = max(edge_degree.values())
+    max_edge_degree = max(edge_degree.values(), default=0)
     norm_edge_degree = {k: v / max_edge_degree for k, v in edge_degree.items()}
 
     # uniform_sorting = {k:(round(b * norm_hops[k] + c * norm_edge_degree[k], 2), 1 - norm_geo_local[k]) for k in
@@ -223,7 +233,7 @@ def predetermine_simbench_sampled(router_reduced=False, r_n=1, w_geo=1, w_hops=1
     """only generates a graph once for one parameterization combination.
     If it already exists, it loads the pickled graph"""
 
-    graph_type = "1-MVLV-urban-all-2-no_sw_fixed.pkl"
+    graph_type = "1-MVLV-rural-all-0-no_sw_fixed.pkl" #"1-MVLV-urban-all-2-no_sw_fixed.pkl"
     graph_name = (f"{graph_type}_reducted={router_reduced}_r_n={r_n}_w_geo={w_geo}_w_hops={ w_hops}_w_degrees={w_degree}"
                   f"_comp_factor={comp_factor}_br_edge={br_edge}_core={br_core}.pkl")
     cwd = Path.cwd()
